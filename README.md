@@ -23,12 +23,12 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 ## 2. CLI Tool
 
-- [] Setup CLI with commander js
-- [] Print CLI logs: "Agent is thinking...", "Editing file...", etc.
+- [x] Setup CLI with commander js
+- [x] Print CLI logs: "Agent is thinking...", "Editing file...", etc.
 
 ## 3. File traversing and data retrieval
 
-- [] Confirm the path for project from the user
+- [x] Confirm the path for project from the user
 - [] Parse `app/page.tsx` - taking an assumption atm for spotify project - but later we might have multiple pages - so can add a question or something to verify which page
 - [] Resolve and read all imported components
 - [] Extract constants from components
