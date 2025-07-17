@@ -29,7 +29,7 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 ## 3. File traversing and data retrieval
 
 - [x] Confirm the path for project from the user
-- [] Parse `app/page.tsx` - taking an assumption atm for spotify project - but later we might have multiple pages - so can add a question or something to verify which page
+- [x] Parse `app/page.tsx` - taking an assumption atm for spotify project - but later we might have multiple pages - so can add a question or something to verify which page
 - [] Resolve and read all imported components
 - [] Extract constants from components
 - [] Detect duplicate dataset names (e.g. `recentlyPlayed`) and resolve conflicts
