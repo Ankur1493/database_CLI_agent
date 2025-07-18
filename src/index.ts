@@ -7,7 +7,7 @@ import {
   getDataset,
 } from "./helperFunctions";
 
-const program = new Command();
+// const program = new Command();
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -34,17 +34,17 @@ function showHelp() {
   console.log("  exit     - Exit the CLI\n");
 }
 
-program
-  .version("1.0.0")
-  .description("A CLI for the Spotify Clone")
-  .option("-n, --name <name>", "Name of the database", "db cragen")
-  .option("-l, --ls <path>", "List directory contents")
-  .option("-i, --imports <path>", "Get imports")
-  .option("-d, --drizzle <path>", "Check drizzle config")
-  .option("-s, --schema <path>", "Generate drizzle orm schema")
-  .option("-q, --query <query>", "Query the database");
+// program
+//   .version("1.0.0")
+//   .description("A CLI for the Spotify Clone")
+//   .option("-n, --name <name>", "Name of the database", "db cragen")
+//   .option("-l, --ls <path>", "List directory contents")
+//   .option("-i, --imports <path>", "Get imports")
+//   .option("-d, --drizzle <path>", "Check drizzle config")
+//   .option("-s, --schema <path>", "Generate drizzle orm schema")
+//   .option("-q, --query <query>", "Query the database");
 
-promptForProjectPath();
+// promptForProjectPath();
 
 const dataset: string[] = [];
 

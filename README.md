@@ -43,9 +43,9 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 ## 6. Schema Generation
 
-- [] Send array data to GPT
-- [] Generate Drizzle schema (save in `/db/schema/`)
-- [] Merge schemas or split as needed
+- [x] Send array data to GPT
+- [x] Generate Drizzle schema (save in `/db/schema/`)
+- [x] Merge schemas or split as needed
   - as there are two kind of recently played constants
 
 ## 7. API Route Generation
