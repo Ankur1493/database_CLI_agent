@@ -1,7 +1,14 @@
 import fs from "fs/promises";
 import { execSync } from "child_process";
 import { logSection, logSubsection } from "./loggingFunctions";
+import { OpenAI } from "openai";
+import { dir } from "console";
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// helper function to check if the project is a next js project
 export async function accessProject(dir: string) {
   try {
     await fs.access(dir);
@@ -26,6 +33,7 @@ export async function accessProject(dir: string) {
   }
 }
 
+// helper function to setup drizzle orm
 export async function drizzleOrmSetup(dir: string) {
   let drizzleStatus = false;
   try {
@@ -35,6 +43,8 @@ export async function drizzleOrmSetup(dir: string) {
       JSON.parse(file).devDependencies?.["drizzle-orm"]
     ) {
       drizzleStatus = true;
+      console.log("Drizzle orm is already installed");
+      return true;
     }
   } catch (err) {
     console.log("No drizzle config file found");
@@ -83,6 +93,7 @@ export async function drizzleOrmSetup(dir: string) {
   return true;
 }
 
+// helper function to extract array constants from a file
 function extractArrayConstants(content: string, fileLabel: string): string[] {
   //  logSubsection(`Data constants in ${fileLabel}`);
 
@@ -144,6 +155,7 @@ function extractArrayConstants(content: string, fileLabel: string): string[] {
   return [];
 }
 
+// helper function to extract local imports from a file for tracking components
 function extractLocalImports(content: string): string[] {
   console.log("Finding the components you have used in the project...");
   const importRegex = /^import\s+.*?from\s+['\"][^'\"]+['\"];?$/gm;
@@ -162,6 +174,7 @@ function extractLocalImports(content: string): string[] {
   });
 }
 
+// helper function to get the dataset for the project
 export async function getDataset(dir: string) {
   //  logSection("Analyzing src/app/page.tsx");
   const dataset = await fs.readFile(dir + "/src/app/page.tsx", "utf-8");
@@ -215,15 +228,20 @@ export async function getDataset(dir: string) {
   return arrayConstants;
 }
 
-/*
-we'll use this prompt inside the agent code to do all this automatically- 
+// helper function to generate the drizzle orm schema
+export async function generateDrizzleSchema(
+  dir: string,
+  arrayConstants: string[]
+) {
+  // we'll use this prompt inside the agent code to do all this automatically-
+  console.log("generating the drizzle orm schema...");
   const prompt = `
       You are a TypeScript and Drizzle ORM expert. 
 Given the following JavaScript constants (arrays of objects), generate Drizzle ORM schema definitions in TypeScript using PostgreSQL:
 
 - Use \`uuid('id').primaryKey().defaultRandom()\` for IDs (if they are string-based).
 - Use \`varchar()\` instead of \`text()\` for short string fields like \`title\`, \`artist\`, etc.
-- Use \`notNull()\` for always-present fields, otherwise mark them with \`optional()\`.
+- Use \`notNull()\` for always-present fields, otherwise mark them with don't add any other parameter by default it is optional.
 - Use appropriate column types: varchar for strings, integer for duration, etc.
 - Merge constants if they have similar structure and table name (e.g., recentlyPlayed1 and recentlyPlayed2).
 - if table constants names are similar, merge them into a single table
@@ -247,4 +265,58 @@ ${arrayConstants.join("\n")}      `;
     ],
   });
 
-*/
+  const responseContent = response.choices[0]?.message?.content ?? "";
+  // Remove markdown code block markers only
+  const importLineMatch = responseContent.match(
+    /^(?:\s*\/\/\s*)?\s*import\s+\{[^}]+\}\s+from\s+['"]drizzle-orm\/pg-core['"];?/m
+  );
+  const importLine =
+    importLineMatch?.[0]
+      ?.replace(/^\s*\/\/\s*/, "") // Remove leading comment
+      .trim() ?? "";
+  const schemaBlocks = [
+    ...responseContent.matchAll(/export const .*?pgTable\([\s\S]+?\}\);/g),
+  ];
+
+  const schemaContent = schemaBlocks.map((match) => match[0]).join("\n\n");
+
+  const processedContent = `${importLine}\n\n${schemaContent}`;
+  // Ensure the drizzle directory exists before writing files
+  const drizzleDir = `${dir}/src/drizzle`;
+  await fs.mkdir(drizzleDir, { recursive: true });
+
+  await Promise.all([
+    fs.writeFile(drizzleDir + "/schema.ts", processedContent),
+    fs.writeFile(
+      drizzleDir + "/db.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js";
+    import * as schema from "./schema";
+    import postgres from "postgres";
+
+    const client = postgres(process.env.DATABASE_URL as string);
+
+    export const db = drizzle(client, { schema, logger: true });
+  `
+    ),
+
+    fs.writeFile(
+      drizzleDir + "/migrate.ts",
+      `import { migrate } from "drizzle-orm/postgres-js/migrator";
+    import {drizzle} from "drizzle-orm/postgres-js";
+    import postgres from "postgres";
+
+    const migrationClient = postgres(process.env.DATABASE_URL as string, {
+      max: 1,
+    });
+
+    await migrate(drizzle(migrationClient), {
+      migrationsFolder: "./src/drizzle/migrations",
+    });
+
+    await migrationClient.end();
+  `
+    ),
+  ]);
+
+  console.log("Drizzle orm schema generated successfully", processedContent);
+}

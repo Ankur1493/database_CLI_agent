@@ -1,6 +1,11 @@
 import readline from "readline";
 import { Command } from "commander";
-import { accessProject, drizzleOrmSetup, getDataset } from "./helperFunctions";
+import {
+  accessProject,
+  drizzleOrmSetup,
+  generateDrizzleSchema,
+  getDataset,
+} from "./helperFunctions";
 
 const program = new Command();
 const rl = readline.createInterface({
@@ -25,6 +30,7 @@ function showHelp() {
   console.log("  ls       - List directory contents");
   console.log("  imports  - Get imports");
   console.log("  drizzle  - Check drizzle config");
+  console.log("  schema   - Generate drizzle orm schema");
   console.log("  exit     - Exit the CLI\n");
 }
 
@@ -35,9 +41,12 @@ program
   .option("-l, --ls <path>", "List directory contents")
   .option("-i, --imports <path>", "Get imports")
   .option("-d, --drizzle <path>", "Check drizzle config")
+  .option("-s, --schema <path>", "Generate drizzle orm schema")
   .option("-q, --query <query>", "Query the database");
 
 promptForProjectPath();
+
+const dataset: string[] = [];
 
 rl.on("line", async (line) => {
   const input = line.trim();
@@ -61,11 +70,15 @@ rl.on("line", async (line) => {
         await accessProject(projectPath);
         break;
       case "imports":
-        const arrayConstants = await getDataset(projectPath);
-        console.log(arrayConstants);
+        //we can later store the data in a json file
+        const data = await getDataset(projectPath);
+        dataset.push(...data);
         break;
       case "drizzle":
         await drizzleOrmSetup(projectPath);
+        break;
+      case "schema":
+        await generateDrizzleSchema(projectPath, dataset);
         break;
       default:
         console.log("Unknown command");
