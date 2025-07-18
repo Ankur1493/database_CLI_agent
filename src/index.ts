@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import { execSync } from "child_process";
 
 import figlet from "figlet";
 import { Command } from "commander";
@@ -26,6 +27,9 @@ program
       case !!options.imports:
         getDataset(options.imports);
         break;
+      case !!options.drizzle:
+        checkDrizzleStatus(options.drizzle);
+        break;
       default:
         console.log("No action specified");
         break;
@@ -34,6 +38,7 @@ program
   .option("-n, --name <name>", "Name of the database", "db cragen")
   .option("-l, --ls <path>", "List directory contents")
   .option("-i, --imports <path>", "Get imports")
+  .option("-d, --drizzle <path>", "Check drizzle config")
   .parse(process.argv);
 
 async function accessProject(dir: string) {
@@ -219,5 +224,55 @@ async function getDataset(dir: string) {
         logSection(`Could not read component file for import: ${importPath}`);
       }
     }
+  }
+}
+
+async function checkDrizzleStatus(dir: string) {
+  let drizzleStatus = false;
+  try {
+    const file = await fs.readFile(dir + "/package.json", "utf-8");
+    if (
+      JSON.parse(file).dependencies?.["drizzle-orm"] ||
+      JSON.parse(file).devDependencies?.["drizzle-orm"]
+    ) {
+      drizzleStatus = true;
+    }
+  } catch (err) {
+    console.log("No drizzle config file found");
+  }
+  if (!drizzleStatus) {
+    console.log("Installing drizzle orm...");
+    execSync("npm install drizzle-orm postgres --legacy-peer-deps", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+    console.log("Drizzle orm installed");
+    execSync("npm install --save-dev drizzle-kit --legacy-peer-deps", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+    console.log("Drizzle kit installed");
+
+    console.log("Creating drizzle config...");
+    await fs.writeFile(
+      dir + "/drizzle.config.ts",
+      `import { defineConfig } from 'drizzle-kit';
+
+      export default defineConfig({
+        schema: './src/drizzle/schema.ts',
+        out: './src/drizzle/migrations',
+        dialect: 'postgresql',
+        dbCredentials: {
+          url: process.env.DATABASE_URL as string,
+        },
+      });`,
+      "utf-8"
+    );
+    await fs.appendFile(
+      dir + ".env",
+      `#this is assumed to be a local postgres database
+      DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spotify`
+    );
+    console.log("Drizzle config created");
   }
 }
