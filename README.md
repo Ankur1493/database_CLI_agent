@@ -41,24 +41,24 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 - [x] if it isn't agent should be able to create these
 - [x] agent should add the required packages
 
-## 4. Schema Generation
+## 6. Schema Generation
 
 - [] Send array data to GPT
 - [] Generate Drizzle schema (save in `/db/schema/`)
 - [] Merge schemas or split as needed
   - as there are two kind of recently played constants
 
-## 5. API Route Generation
+## 7. API Route Generation
 
 - [] Create `GET` route using Drizzle to fetch from DB
 - [] Save to `/app/api/<table>/route.ts`
 
-## 6. Migrations & DB Setup
+## 8. Migrations & DB Setup
 
 - [] Automatically run `drizzle-kit push` or `generate` via Node CLI
 - [] Might insert seed data via `db.insert()`
 
-## 7. GPT Phase 3: Frontend Integration
+## 9 . GPT Phase 3: Frontend Integration
 
 **Bonus section, will do if get time**
 

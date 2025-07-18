@@ -3,9 +3,13 @@ import { execSync } from "child_process";
 
 import figlet from "figlet";
 import { Command } from "commander";
+import OpenAI from "openai";
 
 const program = new Command();
 const options = program.opts();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 figlet("Spotify Clone", (err, data) => {
   if (err) {
@@ -79,8 +83,8 @@ function logSubsection(subtitle: string) {
   console.log("-".repeat(40));
 }
 
-function extractArrayConstants(content: string, fileLabel: string) {
-  logSubsection(`Data constants in ${fileLabel}`);
+function extractArrayConstants(content: string, fileLabel: string): string[] {
+  //  logSubsection(`Data constants in ${fileLabel}`);
 
   const constRegex = /const\s+(\w+)(?:\s*:\s*([^=]+))?\s*=\s*[\r\n]*\[/gm;
   const arrayConstants: string[] = [];
@@ -165,6 +169,8 @@ function extractArrayConstants(content: string, fileLabel: string) {
   } else {
     console.log("No array constants found.");
   }
+
+  return arrayConstants;
 }
 
 function extractLocalImports(content: string): string[] {
@@ -181,7 +187,7 @@ function extractLocalImports(content: string): string[] {
 }
 
 async function getDataset(dir: string) {
-  logSection("Analyzing src/app/page.tsx");
+  //  logSection("Analyzing src/app/page.tsx");
   const dataset = await fs.readFile(dir + "/src/app/page.tsx", "utf-8");
 
   // Extract and print imports only for page.tsx
@@ -196,6 +202,7 @@ async function getDataset(dir: string) {
   // Extract array constants for page.tsx
   extractArrayConstants(dataset, "page.tsx");
 
+  const arrayConstants = [];
   // For each local/aliased import, try to read the file and extract array constants
   for (const imp of localImports) {
     const match = imp.match(/from\s+['\"]([^'\"]+)['\"]/);
@@ -212,19 +219,55 @@ async function getDataset(dir: string) {
     try {
       logSection(`Analyzing ${componentFilePath}`);
       const componentContent = await fs.readFile(componentFilePath, "utf-8");
-      extractArrayConstants(componentContent, componentFilePath);
+      const constants = extractArrayConstants(
+        componentContent,
+        componentFilePath
+      );
+      arrayConstants.push(...constants);
     } catch (err) {
       // Try index.tsx fallback for folders
       try {
         const fallbackPath = componentFilePath.replace(/\.tsx$/, "/index.tsx");
         logSection(`Analyzing ${fallbackPath}`);
         const componentContent = await fs.readFile(fallbackPath, "utf-8");
-        extractArrayConstants(componentContent, fallbackPath);
+        const constants = extractArrayConstants(componentContent, fallbackPath);
+        arrayConstants.push(...constants);
       } catch (err2) {
         logSection(`Could not read component file for import: ${importPath}`);
       }
     }
   }
+  const prompt = `
+      You are a TypeScript and Drizzle ORM expert. 
+Given the following JavaScript constants (arrays of objects), generate Drizzle ORM schema definitions in TypeScript using PostgreSQL:
+
+- Use \`uuid('id').primaryKey().defaultRandom()\` for IDs (if they are string-based).
+- Use \`varchar()\` instead of \`text()\` for short string fields like \`title\`, \`artist\`, etc.
+- Use \`notNull()\` for always-present fields, otherwise mark them with \`optional()\`.
+- Use appropriate column types: varchar for strings, integer for duration, etc.
+- Merge constants if they have similar structure and table name (e.g., recentlyPlayed1 and recentlyPlayed2).
+- if table constants names are similar, merge them into a single table
+- Don't merge tables if the name or purpose is different like madeForYou and recentlyPlayed.
+- Return only valid TypeScript code with named \`export const\` for each table using \`pgTable\`.
+
+
+Dataset:
+${arrayConstants.join("\n")}      `;
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: "You are a Drizzle ORM + TypeScript expert",
+      },
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+  });
+  const drizzleSchemaCode = response.choices[0]?.message?.content;
+  console.log({ drizzleSchemaCode });
 }
 
 async function checkDrizzleStatus(dir: string) {
