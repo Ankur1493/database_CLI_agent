@@ -37,9 +37,9 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 ## 5. Drizzle init
 
-- [] Check if there is a dirzzle config,schema and all
-- [] if it isn't agent should be able to create these
-- [] agent should add the required packages
+- [x] Check if there is a dirzzle config,schema and all
+- [x] if it isn't agent should be able to create these
+- [x] agent should add the required packages
 
 ## 4. Schema Generation
 
