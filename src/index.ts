@@ -241,22 +241,23 @@ async function checkDrizzleStatus(dir: string) {
     console.log("No drizzle config file found");
   }
   if (!drizzleStatus) {
-    console.log("Installing drizzle orm...");
-    execSync("npm install drizzle-orm postgres --legacy-peer-deps", {
-      cwd: dir,
-      stdio: "inherit",
-    });
-    console.log("Drizzle orm installed");
-    execSync("npm install --save-dev drizzle-kit --legacy-peer-deps", {
-      cwd: dir,
-      stdio: "inherit",
-    });
-    console.log("Drizzle kit installed");
+    try {
+      console.log("Installing drizzle orm...");
+      execSync("npm install drizzle-orm postgres --legacy-peer-deps", {
+        cwd: dir,
+        stdio: "inherit",
+      });
+      console.log("Drizzle orm installed");
+      execSync("npm install --save-dev drizzle-kit --legacy-peer-deps", {
+        cwd: dir,
+        stdio: "inherit",
+      });
+      console.log("Drizzle kit installed");
 
-    console.log("Creating drizzle config...");
-    await fs.writeFile(
-      dir + "/drizzle.config.ts",
-      `import { defineConfig } from 'drizzle-kit';
+      console.log("Creating drizzle config...");
+      await fs.writeFile(
+        dir + "/drizzle.config.ts",
+        `import { defineConfig } from 'drizzle-kit';
 
       export default defineConfig({
         schema: './src/drizzle/schema.ts',
@@ -266,13 +267,18 @@ async function checkDrizzleStatus(dir: string) {
           url: process.env.DATABASE_URL as string,
         },
       });`,
-      "utf-8"
-    );
-    await fs.appendFile(
-      dir + ".env",
-      `#this is assumed to be a local postgres database
+        "utf-8"
+      );
+      await fs.appendFile(
+        dir + ".env",
+        `#this is assumed to be a local postgres database
       DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spotify`
-    );
-    console.log("Drizzle config created");
+      );
+      console.log("Drizzle config created");
+    } catch (error) {
+      console.log("Error installing drizzle orm");
+      console.dir(error);
+      return;
+    }
   }
 }
