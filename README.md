@@ -30,9 +30,10 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 - [x] Confirm the path for project from the user
 - [x] Parse `app/page.tsx` - taking an assumption atm for spotify project - but later we might have multiple pages - so can add a question or something to verify which page
-- [] Resolve and read all imported components
-- [] Extract constants from components
-- [] Detect duplicate dataset names (e.g. `recentlyPlayed`) and resolve conflicts
+- [x] Resolve and read all imported components
+- [x] Extract constants from components
+- [x] Detect duplicate dataset names (e.g. `recentlyPlayed`) and resolve conflicts
+  - Got the constants it's in string only atm - thinking to pass it as an array only to API might be better for models to understood
 
 ## 5. Drizzle init
 

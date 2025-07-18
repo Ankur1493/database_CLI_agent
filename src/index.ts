@@ -76,13 +76,89 @@ function logSubsection(subtitle: string) {
 
 function extractArrayConstants(content: string, fileLabel: string) {
   logSubsection(`Data constants in ${fileLabel}`);
-  const arrayConstants = content.match(
-    /const\s+\w+\s*=\s*\[[^\]]*,[^\]]+\];/gm
-  );
-  if (arrayConstants && arrayConstants.length > 0) {
-    arrayConstants.forEach((constant) => console.log(constant));
+
+  const constRegex = /const\s+(\w+)(?:\s*:\s*([^=]+))?\s*=\s*[\r\n]*\[/gm;
+  const arrayConstants: string[] = [];
+
+  let match;
+  while ((match = constRegex.exec(content)) !== null) {
+    const constName = match[1];
+    const startIndex = match.index ?? 0;
+
+    // Find where the array starts after the '='
+    const equalSignIndex = content.indexOf("=", startIndex);
+    const arrayStart = content.indexOf("[", equalSignIndex);
+
+    if (arrayStart === -1) continue;
+
+    let bracketCount = 0;
+    let arrayEnd = -1;
+
+    for (let i = arrayStart; i < content.length; i++) {
+      const char = content[i];
+      if (char === "[") bracketCount++;
+      if (char === "]") bracketCount--;
+      if (bracketCount === 0) {
+        arrayEnd = i;
+        break;
+      }
+    }
+
+    if (arrayEnd === -1) continue;
+
+    const fullArray = content.substring(arrayStart, arrayEnd + 1).trim();
+
+    // Validation: skip arrays that are empty, too small, or don't contain objects
+    const objectMatches = [...fullArray.matchAll(/\{[^}]*\}/g)];
+
+    if (
+      objectMatches.length < 2 || // Require at least 2 objects
+      fullArray === "[]" || // Skip explicitly empty arrays
+      !fullArray.includes("{") || // Must have object structure
+      !fullArray.includes("}") ||
+      fullArray.length < 20 // Skip very short inline values like [0]
+    ) {
+      continue;
+    }
+
+    const fullConstant = `const ${constName} = ${fullArray};`;
+    arrayConstants.push(fullConstant);
+  }
+
+  if (arrayConstants.length > 0) {
+    console.log("\nFound array constants:");
+    // Extract and print titles from the array objects
+    arrayConstants.forEach((constant) => {
+      const match = constant.match(/const\s+(\w+)\s*=\s*(\[[\s\S]*\]);/);
+      if (match && match[2]) {
+        const constantName = match[1];
+        const arrayContent = match[2];
+
+        try {
+          // Use a more robust approach to extract titles
+          const titleMatches = arrayContent.match(
+            /title:\s*['"`]([^'"`]+)['"`]/g
+          );
+          if (titleMatches) {
+            const titles = titleMatches
+              .map((match) => {
+                const titleMatch = match.match(/title:\s*['"`]([^'"`]+)['"`]/);
+                return titleMatch ? titleMatch[1] : "";
+              })
+              .filter((title): title is string => Boolean(title));
+
+            console.log(`\n${constantName}:`);
+            titles.forEach((title: string) => console.log(`  - ${title}`));
+          } else {
+            console.log(`\n${constantName}: No titles found`);
+          }
+        } catch (error) {
+          console.log(`Error parsing ${constantName}: ${error}`);
+        }
+      }
+    });
   } else {
-    console.log("No data constants found.");
+    console.log("No array constants found.");
   }
 }
 
