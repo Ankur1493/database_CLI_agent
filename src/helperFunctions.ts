@@ -750,3 +750,228 @@ seedDatabase().catch(console.error);
 
   return seedContent;
 }
+
+export async function generateAPIRoute(dir: string, userQuery?: string) {
+  console.log("Generating API routes...");
+
+  // Get parsed data from data.json
+  const parsedData = await getParsedData(dir);
+
+  if (Object.keys(parsedData).length === 0) {
+    console.log(
+      "No data found. Please run 'imports' command first to extract data."
+    );
+    return;
+  }
+
+  // Read the schema file
+  let schemaContent = "";
+  try {
+    schemaContent = await fs.readFile(`${dir}/src/drizzle/schema.ts`, "utf-8");
+  } catch (error) {
+    console.log("Error reading schema file:", error);
+    return;
+  }
+
+  // Generate API route using GPT with user query and schema
+  if (userQuery) {
+    await generateAPIRouteWithGPT(dir, userQuery, schemaContent, parsedData);
+  } else {
+    console.log(
+      "Please provide a query to generate API routes for specific tables"
+    );
+  }
+}
+
+// Helper function to generate API route using GPT with user query and schema
+async function generateAPIRouteWithGPT(
+  dir: string,
+  userQuery: string,
+  schemaContent: string,
+  parsedData: Record<string, any[]>
+) {
+  console.log(`Generating API route for query: "${userQuery}" using GPT...`);
+
+  const availableTables = Object.keys(parsedData);
+
+  const prompt = `
+You are a Next.js App Router API expert. The user wants to create an API route for: "${userQuery}"
+
+AVAILABLE TABLES IN SCHEMA:
+${availableTables.join(", ")}
+
+SCHEMA CONTENT:
+${schemaContent}
+
+TASK:
+1. Analyze the user query and identify which table from the schema should be used
+2. Create a complete API route file for the identified table
+3. Use proper Next.js App Router structure: src/app/api/[routeName]/route.ts
+4. Convert table name to kebab-case for the route path (e.g., "recentlyPlayed" becomes "recently-played")
+5. We will be using only single table for a request, but in case you think that user asking for multiple tables, send an error message that we can't do that
+6. If user is asking for a table that is not in the schema, send an error message that we can't do that
+
+IMPORTANT REQUIREMENTS:
+- Use Drizzle ORM for database operations
+- The schema file is located at: src/drizzle/schema.ts
+- Import the schema as: import * as schema from '../../../drizzle/schema'
+- Import database connection as: import { db } from '../../../drizzle/db'
+- Use proper Next.js imports: import { NextRequest, NextResponse } from 'next/server'
+- Include these CRUD operations in one route.ts file:
+  * GET /api/[route] - Get all records (use ?limit=10&offset=0&search=term) or single record (use ?id=uuid)
+  * POST /api/[route] - Create new record
+  * DELETE /api/[route] - Delete record (use ?id=uuid)
+- Use proper error handling and status codes
+- Return JSON responses with success/error flags
+- Use the correct table name from the schema (convert to camelCase if needed)
+
+CORRECT DRIZZLE SYNTAX EXAMPLES:
+- Select all: db.select().from(schema.tableName)
+- Select with where: db.select().from(schema.tableName).where(eq(schema.tableName.id, id))
+- Select with like: db.select().from(schema.tableName).where(like(schema.tableName.title, '%' + search + '%'))
+- Insert: db.insert(schema.tableName).values(data).returning()
+- Delete: db.delete(schema.tableName).where(eq(schema.tableName.id, id)).returning()
+- Import eq and like: import { eq, like } from 'drizzle-orm'
+
+EXAMPLE API STRUCTURE:
+Create one route.ts file with all CRUD operations:
+
+import { NextRequest, NextResponse } from 'next/server';
+import { eq, like } from 'drizzle-orm';
+import * as schema from '../../../drizzle/schema';
+import { db } from '../../../drizzle/db';
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const limit = Number(searchParams.get('limit')) || 10;
+  const offset = Number(searchParams.get('offset')) || 0;
+  const id = searchParams.get('id');
+
+  if (id) {
+    // Get single record by ID
+    const record = await db.select().from(schema.tableName).where(eq(schema.tableName.id, id));
+    return NextResponse.json({ success: true, data: record });
+  }
+
+  // Get all records with optional filtering
+  let query = db.select().from(schema.tableName).limit(limit).offset(offset);
+  
+  const records = await query;
+  return NextResponse.json({ success: true, data: records });
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const record = await db.insert(schema.tableName).values(body).returning();
+  return NextResponse.json({ success: true, data: record });
+}
+
+export async function DELETE(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+
+  if (!id) {
+    return NextResponse.json({ success: false, message: 'ID is required' }, { status: 400 });
+  }
+
+  const deletedRecord = await db.delete(schema.tableName).where(eq(schema.tableName.id, id)).returning();
+  return NextResponse.json({ success: true, data: deletedRecord });
+}
+
+RESPONSE FORMAT:
+If generating an API route, return the response in this exact format:
+ROUTE_NAME: [kebab-case-route-name]
+[TypeScript code for route.ts]
+
+If sending an error message, return ONLY the error message like "can't do that" or "multiple tables" or "not in the schema".
+
+IMPORTANT: Always start with ROUTE_NAME: for successful responses, or just the error message for failures.
+Do not include any explanations or markdown formatting.
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a Next.js App Router API expert who generates clean, production-ready API routes using Drizzle ORM. You analyze user queries and intelligently select the most appropriate database table from the provided schema.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const apiRouteContent = response.choices[0]?.message?.content ?? "";
+
+    if (!apiRouteContent.trim()) {
+      console.log("❌ Error: No content generated by GPT");
+      console.log(
+        "Please try again with a different query or check your OpenAI API key."
+      );
+      return;
+    }
+
+    // Check if the response contains error messages from GPT
+    const errorKeywords = [
+      "can't do that",
+      "multiple tables",
+      "not in the schema",
+      "cannot",
+      "unable to",
+    ];
+
+    const hasError = errorKeywords.some((keyword) =>
+      apiRouteContent.toLowerCase().includes(keyword)
+    );
+
+    if (hasError) {
+      console.log("❌ Error: " + apiRouteContent.trim());
+      return;
+    }
+
+    // Extract route name and code from GPT response
+    const routeNameMatch = apiRouteContent.match(/^ROUTE_NAME:\s*([^\n]+)/);
+    if (!routeNameMatch) {
+      console.log("❌ Error: No route name found in GPT response");
+      console.log("Expected format: ROUTE_NAME: [route-name]");
+      return;
+    }
+
+    const routeName = routeNameMatch[1]?.trim() ?? "";
+
+    if (!routeName) {
+      console.log("❌ Error: Empty route name received from GPT");
+      return;
+    }
+
+    // Validate route name format (should be kebab-case)
+    if (!/^[a-z0-9-]+$/.test(routeName)) {
+      console.log("❌ Error: Invalid route name format");
+      console.log("Route name should be kebab-case (e.g., 'recently-played')");
+      return;
+    }
+
+    const codeContent = apiRouteContent
+      .replace(/^ROUTE_NAME:\s*[^\n]+\n/, "")
+      .trim();
+
+    // Create the API routes directory structure
+    const apiDir = `${dir}/src/app/api/${routeName}`;
+    await fs.mkdir(apiDir, { recursive: true });
+
+    // Write the API route file
+    await fs.writeFile(`${apiDir}/route.ts`, codeContent, "utf-8");
+    console.log(
+      `✅ API route created successfully: src/app/api/${routeName}/route.ts`
+    );
+    console.log(`🔗 Route path: /api/${routeName}`);
+    console.log(`📝 Generated from query: "${userQuery}"`);
+  } catch (error) {
+    console.log("❌ Error generating API route with GPT:", error);
+    console.log("Please check your OpenAI API key and try again.");
+  }
+}

@@ -7,6 +7,7 @@ import {
   getDataset,
   seedDatabase,
   getParsedData,
+  generateAPIRoute,
 } from "./helperFunctions";
 
 // const program = new Command();
@@ -35,6 +36,8 @@ function showHelp() {
   console.log("  drizzle  - Check drizzle config");
   console.log("  schema   - Generate drizzle orm schema");
   console.log("  seed     - Seed the database with extracted data");
+  console.log("  api      - Generate API route (usage: api <query>)");
+  console.log("            Example: api create API for recently played songs");
   console.log("  exit     - Exit the CLI\n");
   console.log("Workflow: imports → drizzle → schema → seed");
 }
@@ -95,6 +98,16 @@ rl.on("line", async (line) => {
         break;
       case "seed":
         await seedDatabase(projectPath);
+        break;
+      case "api":
+        if (args.length < 2) {
+          console.log("Usage: api <query>");
+          console.log("Example: api create API for recently played songs");
+          rl.prompt();
+          return;
+        }
+        const userQuery = args.slice(1).join(" ");
+        await generateAPIRoute(projectPath, userQuery);
         break;
       default:
         console.log("Unknown command");
