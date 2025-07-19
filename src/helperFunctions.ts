@@ -81,7 +81,7 @@ export async function drizzleOrmSetup(dir: string) {
       await fs.appendFile(
         dir + "/.env",
         `#this is assumed to be a local postgres database
-      DATABASE_URL=postgresql://postgres:postgres@localhost:5432/spotify`
+      DATABASE_URL=postgres://postgres:postgres@localhost:5432/mydb`
       );
       console.log("Drizzle config created");
     } catch (error) {
@@ -239,15 +239,19 @@ export async function generateDrizzleSchema(
       You are a TypeScript and Drizzle ORM expert. 
 Given the following JavaScript constants (arrays of objects), generate Drizzle ORM schema definitions in TypeScript using PostgreSQL:
 
+IMPORTANT RULES:
 - Use \`uuid('id').primaryKey().defaultRandom()\` for IDs (if they are string-based).
 - Use \`varchar()\` instead of \`text()\` for short string fields like \`title\`, \`artist\`, etc.
-- Use \`notNull()\` for always-present fields, otherwise mark them with don't add any other parameter by default it is optional.
+- Use \`notNull()\` for always-present fields, otherwise leave fields optional (no additional parameters).
 - Use appropriate column types: varchar for strings, integer for duration, etc.
-- Merge constants if they have similar structure and table name (e.g., recentlyPlayed1 and recentlyPlayed2).
-- if table constants names are similar, merge them into a single table
-- Don't merge tables if the name or purpose is different like madeForYou and recentlyPlayed.
+- MERGE arrays with EXACTLY the same constant name by creating a unified schema that includes ALL fields from both structures.
+- For example, if you have 'recentlyPlayed' with 'subtitle' and another 'recentlyPlayed' with 'artist'/'album', create one table with: id, title, subtitle, artist, album, image, duration.
+- Make fields optional (no .notNull()) if they don't exist in all arrays with the same name.
+- Create SEPARATE tables for different constant names (e.g., 'madeForYou' and 'popularAlbums' should be separate tables).
 - Return only valid TypeScript code with named \`export const\` for each table using \`pgTable\`.
+- Include the import statement: \`import { pgTable, uuid, varchar, integer } from 'drizzle-orm/pg-core';\`
 
+Analyze each constant array carefully and create separate tables for each unique constant name, merging only arrays with identical names.
 
 Dataset:
 ${arrayConstants.join("\n")}      `;
@@ -301,22 +305,65 @@ ${arrayConstants.join("\n")}      `;
 
     fs.writeFile(
       drizzleDir + "/migrate.ts",
-      `import { migrate } from "drizzle-orm/postgres-js/migrator";
-    import {drizzle} from "drizzle-orm/postgres-js";
-    import postgres from "postgres";
+      `import dotenv from "dotenv";
+dotenv.config({path: ".env"});
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
-    const migrationClient = postgres(process.env.DATABASE_URL as string, {
-      max: 1,
-    });
+async function runMigrations() {
+  const migrationClient = postgres(process.env.DATABASE_URL as string, {
+    max: 1,
+  });
 
+  try {
     await migrate(drizzle(migrationClient), {
       migrationsFolder: "./src/drizzle/migrations",
     });
-
+    console.log("Migrations completed successfully");
+  } catch (error) {
+    console.error("Migration failed:", error);
+    throw error;
+  } finally {
     await migrationClient.end();
-  `
+  }
+}
+
+runMigrations().catch(console.error);
+`
     ),
   ]);
 
   console.log("Drizzle orm schema generated successfully", processedContent);
+
+  // Generate migrations using drizzle-kit
+  try {
+    console.log("Generating database migrations...");
+    execSync("npx drizzle-kit generate", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+    console.log("Database migrations generated successfully");
+
+    // Install tsx if not available
+    console.log("Installing tsx for TypeScript execution...");
+    execSync("npm install --save-dev dotenv tsx --legacy-peer-deps", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+
+    // Run migrations to update the database
+    console.log("Running database migrations...");
+    execSync("npx tsx src/drizzle/migrate.ts", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+    console.log("Database migrations applied successfully");
+  } catch (error) {
+    console.log("Error during database operations:", error);
+    console.log("You can manually run the following commands:");
+    console.log("1. npx drizzle-kit generate");
+    console.log("2. npm install --save-dev tsx --legacy-peer-deps");
+    console.log("3. npx tsx src/drizzle/migrate.ts");
+  }
 }
