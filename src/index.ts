@@ -83,9 +83,16 @@ rl.on("line", async (line) => {
         if (Object.keys(parsedData).length > 0) {
           console.log("\nExtracted data summary:");
           for (const [tableName, data] of Object.entries(parsedData)) {
-            console.log(`\n${tableName} (${data.length} records):`);
-            if (data.length > 0) {
-              console.log("Sample record:", JSON.stringify(data[0], null, 2));
+            // Skip apiRoutes table
+            if (tableName === "apiRoutes") {
+              continue;
+            }
+            console.log(`\n${tableName} (${data.data.length} records):`);
+            if (data.data.length > 0) {
+              console.log(
+                "Sample record:",
+                JSON.stringify(data.data[0], null, 2)
+              );
             }
           }
         }

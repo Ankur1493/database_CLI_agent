@@ -229,7 +229,54 @@ export async function getDataset(dir: string) {
   // Parse the array constants and save to data.json
   if (arrayConstants.length > 0) {
     console.log("Parsing extracted data and saving to data.json...");
-    const parsedData = parseArrayConstants(arrayConstants);
+
+    // Track source files for each constant
+    const sourceFiles: string[] = [];
+    for (const imp of localImports) {
+      const match = imp.match(/from\s+['\"]([^'\"]+)['\"]/);
+      const importPath = match?.[1];
+      if (!importPath) continue;
+
+      let componentFilePath = "";
+      if (importPath.startsWith("@")) {
+        componentFilePath = dir + "/src" + importPath.slice(1) + ".tsx";
+      } else if (importPath.startsWith(".")) {
+        componentFilePath = dir + "/src/app/" + importPath + ".tsx";
+      }
+
+      // Add source file for each constant found in this file
+      try {
+        const componentContent = await fs.readFile(componentFilePath, "utf-8");
+        const constants = extractArrayConstants(
+          componentContent,
+          componentFilePath
+        );
+        // Add the source file for each constant found
+        for (let i = 0; i < constants.length; i++) {
+          sourceFiles.push(componentFilePath);
+        }
+      } catch (err) {
+        // Try index.tsx fallback for folders
+        try {
+          const fallbackPath = componentFilePath.replace(
+            /\.tsx$/,
+            "/index.tsx"
+          );
+          const componentContent = await fs.readFile(fallbackPath, "utf-8");
+          const constants = extractArrayConstants(
+            componentContent,
+            fallbackPath
+          );
+          for (let i = 0; i < constants.length; i++) {
+            sourceFiles.push(fallbackPath);
+          }
+        } catch (err2) {
+          // Skip if file not found
+        }
+      }
+    }
+
+    const parsedData = parseArrayConstants(arrayConstants, sourceFiles);
 
     if (Object.keys(parsedData).length > 0) {
       // Save the parsed data to data.json
@@ -243,8 +290,12 @@ export async function getDataset(dir: string) {
 
       // Log summary of extracted data
       console.log(`\nExtracted data summary:`);
-      for (const [tableName, data] of Object.entries(parsedData)) {
-        console.log(`  - ${tableName}: ${data.length} records`);
+      for (const [tableName, dataInfo] of Object.entries(parsedData)) {
+        console.log(
+          `  - ${tableName}: ${
+            dataInfo.data.length
+          } records (from ${dataInfo.sourceFiles.join(", ")})`
+        );
       }
     } else {
       console.log("No valid data found to save");
@@ -257,7 +308,7 @@ export async function getDataset(dir: string) {
 // helper function to read parsed data from data.json
 export async function getParsedData(
   dir: string
-): Promise<Record<string, any[]>> {
+): Promise<Record<string, { data: any[]; sourceFiles: string[] }>> {
   try {
     const dataFilePath = `${dir}/data.json`;
     const dataContent = await fs.readFile(dataFilePath, "utf-8");
@@ -294,8 +345,8 @@ export async function generateDrizzleSchema(dir: string) {
 
   // Convert parsed data back to array constants format for the AI prompt
   const arrayConstants: string[] = [];
-  for (const [tableName, data] of Object.entries(parsedData)) {
-    const arrayContent = JSON.stringify(data, null, 2);
+  for (const [tableName, dataInfo] of Object.entries(parsedData)) {
+    const arrayContent = JSON.stringify(dataInfo.data, null, 2);
     const fullConstant = `const ${tableName} = ${arrayContent};`;
     arrayConstants.push(fullConstant);
   }
@@ -455,8 +506,8 @@ export async function seedDatabase(dir: string) {
 
   try {
     console.log(`Found ${Object.keys(parsedData).length} tables to seed:`);
-    for (const [tableName, data] of Object.entries(parsedData)) {
-      console.log(`  - ${tableName}: ${data.length} records`);
+    for (const [tableName, dataInfo] of Object.entries(parsedData)) {
+      console.log(`  - ${tableName}: ${dataInfo.data.length} records`);
     }
 
     // Generate seed file
@@ -486,12 +537,19 @@ export async function seedDatabase(dir: string) {
 }
 
 // Helper function to parse array constants into structured data
-function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
-  const parsedData: Record<string, any[]> = {};
+function parseArrayConstants(
+  arrayConstants: string[],
+  sourceFiles: string[]
+): Record<string, { data: any[]; sourceFiles: string[] }> {
+  const parsedData: Record<string, { data: any[]; sourceFiles: string[] }> = {};
 
   console.log(`Processing ${arrayConstants.length} array constants`);
 
-  for (const constant of arrayConstants) {
+  for (let i = 0; i < arrayConstants.length; i++) {
+    const constant = arrayConstants[i];
+    if (!constant) continue;
+    const sourceFile = sourceFiles[i] || "unknown";
+
     try {
       // Extract constant name and array content
       const constMatch = constant.match(
@@ -506,7 +564,7 @@ function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
       const constName = constMatch[1];
       const arrayContent = constMatch[2];
 
-      console.log(`Parsing constant: ${constName}`);
+      console.log(`Parsing constant: ${constName} from ${sourceFile}`);
       console.log(`Array content length: ${arrayContent.length}`);
 
       // Try to parse using a more robust approach
@@ -515,12 +573,22 @@ function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
         // Merge with existing data if constant name already exists
         if (parsedData[constName]) {
           console.log(`Merging data for existing constant: ${constName}`);
-          parsedData[constName] = [...parsedData[constName], ...extractedArray];
+          parsedData[constName].data = [
+            ...parsedData[constName].data,
+            ...extractedArray,
+          ];
+          // Add source file if not already present
+          if (!parsedData[constName].sourceFiles.includes(sourceFile)) {
+            parsedData[constName].sourceFiles.push(sourceFile);
+          }
         } else {
-          parsedData[constName] = extractedArray;
+          parsedData[constName] = {
+            data: extractedArray,
+            sourceFiles: [sourceFile],
+          };
         }
         console.log(
-          `Successfully parsed ${extractedArray.length} items for ${constName}`
+          `Successfully parsed ${extractedArray.length} items for ${constName} from ${sourceFile}`
         );
       } else {
         console.log(`Failed to extract data for ${constName}`);
@@ -531,14 +599,15 @@ function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
   }
 
   // Now normalize the data to ensure all records have the same fields
-  const normalizedData: Record<string, any[]> = {};
+  const normalizedData: Record<string, { data: any[]; sourceFiles: string[] }> =
+    {};
 
-  for (const [tableName, data] of Object.entries(parsedData)) {
+  for (const [tableName, dataInfo] of Object.entries(parsedData)) {
     console.log(`Normalizing data for ${tableName}...`);
 
     // Collect all unique field names from all records
     const allFields = new Set<string>();
-    data.forEach((record) => {
+    dataInfo.data.forEach((record) => {
       Object.keys(record).forEach((key) => allFields.add(key));
     });
 
@@ -546,7 +615,7 @@ function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
 
     // Deduplicate records based on id field
     const uniqueRecords = new Map<string, any>();
-    data.forEach((record) => {
+    dataInfo.data.forEach((record) => {
       const id = record.id;
       if (id) {
         if (uniqueRecords.has(id)) {
@@ -583,7 +652,10 @@ function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
       }
     );
 
-    normalizedData[tableName] = normalizedRecords;
+    normalizedData[tableName] = {
+      data: normalizedRecords,
+      sourceFiles: dataInfo.sourceFiles,
+    };
     console.log(
       `Normalized ${normalizedRecords.length} unique records for ${tableName}`
     );
@@ -688,7 +760,9 @@ function extractArrayManually(arrayString: string): any[] {
 }
 
 // Helper function to generate the seed file content
-function generateSeedFile(parsedData: Record<string, any[]>): string {
+function generateSeedFile(
+  parsedData: Record<string, { data: any[]; sourceFiles: string[] }>
+): string {
   let seedContent = `import dotenv from "dotenv";
 dotenv.config({path: ".env"});
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -704,15 +778,15 @@ async function seedDatabase() {
 `;
 
   // Generate insert statements for each table
-  for (const [tableName, data] of Object.entries(parsedData)) {
-    if (data.length === 0) continue;
+  for (const [tableName, dataInfo] of Object.entries(parsedData)) {
+    if (dataInfo.data.length === 0) continue;
 
     // Convert table name to camelCase for schema reference
     const schemaTableName =
       tableName.charAt(0).toLowerCase() + tableName.slice(1);
 
     // Remove 'id' field from data since schema auto-generates UUIDs
-    const dataWithoutId = data.map((item) => {
+    const dataWithoutId = dataInfo.data.map((item) => {
       const { id, ...itemWithoutId } = item;
       return itemWithoutId;
     });
@@ -783,12 +857,11 @@ export async function generateAPIRoute(dir: string, userQuery?: string) {
   }
 }
 
-// Helper function to generate API route using GPT with user query and schema
 async function generateAPIRouteWithGPT(
   dir: string,
   userQuery: string,
   schemaContent: string,
-  parsedData: Record<string, any[]>
+  parsedData: Record<string, { data: any[]; sourceFiles: string[] }>
 ) {
   console.log(`Generating API route for query: "${userQuery}" using GPT...`);
 
@@ -803,13 +876,20 @@ ${availableTables.join(", ")}
 SCHEMA CONTENT:
 ${schemaContent}
 
-TASK:
-1. Analyze the user query and identify which table from the schema should be used
-2. Create a complete API route file for the identified table
-3. Use proper Next.js App Router structure: src/app/api/[routeName]/route.ts
-4. Convert table name to kebab-case for the route path (e.g., "recentlyPlayed" becomes "recently-played")
-5. We will be using only single table for a request, but in case you think that user asking for multiple tables, send an error message that we can't do that
-6. If user is asking for a table that is not in the schema, send an error message that we can't do that
+CRITICAL RULES:
+1. FIRST, analyze the user query and identify what table they want (e.g., "movies", "songs", "albums", etc.)
+2. Check if that table exists in the AVAILABLE TABLES list above
+3. If the requested table does NOT exist in the schema, return ONLY the error message: "table not found"
+4. If the user is asking for multiple tables, return ONLY the error message: "multiple tables not supported"
+5. User query can be anything, so you need to be carefull to see if that even relates with our schema table or not 
+6. If the user is asking for a table that is not in the schema, return ONLY the error message: "table not found"
+
+TASK (only if table exists):
+1. Create a complete API route file for the identified table
+2. Use proper Next.js App Router structure: src/app/api/[routeName]/route.ts
+3. Convert table name to kebab-case for the route path (e.g., "recentlyPlayed" becomes "recently-played")
+4. Use the EXACT table name from the AVAILABLE TABLES list (do NOT convert to snake_case or any other format)
+5. For TABLE_NAME in response, use the EXACT table name as it appears in AVAILABLE TABLES
 
 IMPORTANT REQUIREMENTS:
 - Use Drizzle ORM for database operations
@@ -881,12 +961,16 @@ export async function DELETE(request: NextRequest) {
 RESPONSE FORMAT:
 If generating an API route, return the response in this exact format:
 ROUTE_NAME: [kebab-case-route-name]
+TABLE_NAME: [exact-table-name-from-schema]
 [TypeScript code for route.ts]
 
-If sending an error message, return ONLY the error message like "can't do that" or "multiple tables" or "not in the schema".
+If sending an error message, return ONLY the error message like "table not found" or "multiple tables not supported".
 
-IMPORTANT: Always start with ROUTE_NAME: for successful responses, or just the error message for failures.
-Do not include any explanations or markdown formatting.
+IMPORTANT: 
+- Always start with ROUTE_NAME: and TABLE_NAME: for successful responses
+- Use the EXACT table name from the AVAILABLE TABLES list above (e.g., "recentlyPlayed", not "recently_played")
+- Do NOT convert table names to snake_case or any other format
+- Do not include any explanations or markdown formatting
 `;
 
   try {
@@ -914,10 +998,12 @@ Do not include any explanations or markdown formatting.
       );
       return;
     }
+    console.log({ apiRouteContent });
 
     // Check if the response contains error messages from GPT
     const errorKeywords = [
       "can't do that",
+      "table not found",
       "multiple tables",
       "not in the schema",
       "cannot",
@@ -933,18 +1019,32 @@ Do not include any explanations or markdown formatting.
       return;
     }
 
-    // Extract route name and code from GPT response
+    // Extract route name and table name from GPT response
     const routeNameMatch = apiRouteContent.match(/^ROUTE_NAME:\s*([^\n]+)/);
+    const tableNameMatch = apiRouteContent.match(/^TABLE_NAME:\s*([^\n]+)/m);
+
     if (!routeNameMatch) {
       console.log("❌ Error: No route name found in GPT response");
       console.log("Expected format: ROUTE_NAME: [route-name]");
       return;
     }
 
+    if (!tableNameMatch) {
+      console.log("❌ Error: No table name found in GPT response");
+      console.log("Expected format: TABLE_NAME: [table-name]");
+      return;
+    }
+
     const routeName = routeNameMatch[1]?.trim() ?? "";
+    const tableName = tableNameMatch[1]?.trim() ?? "";
 
     if (!routeName) {
       console.log("❌ Error: Empty route name received from GPT");
+      return;
+    }
+
+    if (!tableName) {
+      console.log("❌ Error: Empty table name received from GPT");
       return;
     }
 
@@ -955,8 +1055,20 @@ Do not include any explanations or markdown formatting.
       return;
     }
 
+    // Validate table name exists in available tables
+    if (!availableTables.includes(tableName)) {
+      console.log(
+        `❌ Error: Table name "${tableName}" not found in available tables`
+      );
+      console.log(`Available tables: ${availableTables.join(", ")}`);
+      return;
+    }
+
+    console.log(`📋 GPT provided table name: ${tableName}`);
+
     const codeContent = apiRouteContent
       .replace(/^ROUTE_NAME:\s*[^\n]+\n/, "")
+      .replace(/^TABLE_NAME:\s*[^\n]+\n/m, "")
       .trim();
 
     // Create the API routes directory structure
@@ -970,8 +1082,256 @@ Do not include any explanations or markdown formatting.
     );
     console.log(`🔗 Route path: /api/${routeName}`);
     console.log(`📝 Generated from query: "${userQuery}"`);
+
+    // Store API route details in data.json for tracking
+    try {
+      const dataFilePath = `${dir}/data.json`;
+      let existingData: any = {};
+
+      // Read existing data.json if it exists
+      try {
+        const existingContent = await fs.readFile(dataFilePath, "utf-8");
+        existingData = JSON.parse(existingContent);
+      } catch (readError) {
+        // If file doesn't exist or is invalid, start with empty object
+        console.log("Creating new data.json file for API route tracking");
+      }
+
+      // Initialize apiRoutes array if it doesn't exist
+      if (!existingData.apiRoutes) {
+        existingData.apiRoutes = [];
+      }
+
+      // Add the new API route details
+      const apiRouteDetails = {
+        routeName: routeName,
+        filePath: `src/app/api/${routeName}/route.ts`,
+        routePath: `/api/${routeName}`,
+        generatedFrom: userQuery,
+        createdAt: new Date().toISOString(),
+        tableUsed: tableName,
+      };
+
+      existingData.apiRoutes.push(apiRouteDetails);
+
+      // Write updated data back to data.json
+      await fs.writeFile(
+        dataFilePath,
+        JSON.stringify(existingData, null, 2),
+        "utf-8"
+      );
+      console.log(`📋 API route details stored in data.json`);
+      console.log(
+        `📊 Total API routes tracked: ${existingData.apiRoutes.length}`
+      );
+      generateFrontendFetchCalls(
+        dir,
+        apiRouteDetails.routePath,
+        apiRouteDetails.tableUsed,
+        parsedData
+      );
+    } catch (trackingError) {
+      console.log(
+        "⚠️ Warning: Could not store API route details in data.json:",
+        trackingError
+      );
+    }
   } catch (error) {
     console.log("❌ Error generating API route with GPT:", error);
     console.log("Please check your OpenAI API key and try again.");
   }
+}
+
+async function generateFrontendFetchCalls(
+  dir: string,
+  routePath: string,
+  tableName: string,
+  parsedData: Record<string, { data: any[]; sourceFiles: string[] }>
+) {
+  console.log(`Generating frontend fetch calls for ${tableName}...`);
+
+  // Find the source files for this table
+  const tableInfo = parsedData[tableName];
+  if (!tableInfo) {
+    console.log(`❌ No data found for table: ${tableName}`);
+    return;
+  }
+
+  const sourceFiles = tableInfo.sourceFiles;
+  console.log(`📁 Source files: ${sourceFiles.join(", ")}`);
+
+  // Update all source files that contain this constant
+  for (const sourceFile of sourceFiles) {
+    console.log(`🔄 Updating ${sourceFile}...`);
+
+    try {
+      // Read the source file
+      const fileContent = await fs.readFile(sourceFile, "utf-8");
+
+      // Find the constant declaration for this table
+      // First, let's check if the constant name exists in the file
+      if (!fileContent.includes(tableName)) {
+        console.log(
+          `❌ Constant name "${tableName}" not found in ${sourceFile}`
+        );
+        continue;
+      }
+
+      // Try multiple regex patterns to find the constant declaration
+      let constMatch = null;
+      const patterns = [
+        // Pattern 1: const name = [array];
+        new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\];`, "g"),
+        // Pattern 2: const name = [array] (without semicolon)
+        new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\]`, "g"),
+        // Pattern 3: const name: type = [array];
+        new RegExp(
+          `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\];`,
+          "g"
+        ),
+        // Pattern 4: const name: type = [array] (without semicolon)
+        new RegExp(
+          `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\]`,
+          "g"
+        ),
+      ];
+
+      for (const pattern of patterns) {
+        constMatch = fileContent.match(pattern);
+        if (constMatch) {
+          console.log(`✅ Found constant using pattern: ${pattern.source}`);
+          break;
+        }
+      }
+
+      if (!constMatch) {
+        console.log(
+          `❌ Could not find constant declaration for ${tableName} in ${sourceFile}`
+        );
+        console.log(
+          `🔍 Debug: File contains "${tableName}" but no matching declaration pattern`
+        );
+        // Let's show a snippet around where the constant name appears
+        const nameIndex = fileContent.indexOf(tableName);
+        if (nameIndex !== -1) {
+          const start = Math.max(0, nameIndex - 50);
+          const end = Math.min(fileContent.length, nameIndex + 50);
+          console.log(
+            `🔍 Context around "${tableName}": "${fileContent.substring(
+              start,
+              end
+            )}"`
+          );
+        }
+        continue; // Skip this file and continue with others
+      }
+
+      // Generate the updated code with useEffect and fetch
+      const updatedCode = generateUpdatedComponentCode(
+        fileContent,
+        tableName,
+        routePath
+      );
+
+      // Write the updated file
+      await fs.writeFile(sourceFile, updatedCode, "utf-8");
+      console.log(`✅ Updated ${sourceFile} with fetch calls for ${tableName}`);
+    } catch (error) {
+      console.log(`❌ Error updating frontend file ${sourceFile}: ${error}`);
+    }
+  }
+}
+
+function generateUpdatedComponentCode(
+  fileContent: string,
+  tableName: string,
+  routePath: string
+): string {
+  // Add "use client" directive if not present
+  let updatedContent = fileContent;
+  if (!fileContent.includes('"use client"')) {
+    updatedContent = '"use client";\n\n' + fileContent;
+  }
+
+  // Add useState and useEffect imports if not present
+  if (!fileContent.includes("useState") && !fileContent.includes("useEffect")) {
+    const importMatch = fileContent.match(
+      /import\s+\{[^}]*\}\s+from\s+['"]react['"]/
+    );
+    if (importMatch) {
+      // Add to existing React import
+      updatedContent = updatedContent.replace(
+        /import\s+\{([^}]*)\}\s+from\s+['"]react['"]/,
+        'import { $1, useState, useEffect } from "react"'
+      );
+    } else {
+      // Add new React import
+      updatedContent =
+        'import { useState, useEffect } from "react";\n\n' + updatedContent;
+    }
+  }
+
+  // Find the constant declaration and replace it with useState
+  // Try multiple regex patterns to find the constant declaration
+  let constMatch = null;
+  const patterns = [
+    // Pattern 1: const name = [array];
+    new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\];`, "g"),
+    // Pattern 2: const name = [array] (without semicolon)
+    new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\]`, "g"),
+    // Pattern 3: const name: type = [array];
+    new RegExp(
+      `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\];`,
+      "g"
+    ),
+    // Pattern 4: const name: type = [array] (without semicolon)
+    new RegExp(`const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\]`, "g"),
+  ];
+
+  for (const pattern of patterns) {
+    constMatch = updatedContent.match(pattern);
+    if (constMatch) {
+      console.log(
+        `✅ Found constant for replacement using pattern: ${pattern.source}`
+      );
+      break;
+    }
+  }
+
+  if (constMatch) {
+    const originalConstant = constMatch[0];
+    const useStateDeclaration = `const [${tableName}, set${
+      tableName.charAt(0).toUpperCase() + tableName.slice(1)
+    }] = useState([]);`;
+
+    // Add useEffect after the useState declaration
+    const useEffectCode = `
+  useEffect(() => {
+    const fetch${
+      tableName.charAt(0).toUpperCase() + tableName.slice(1)
+    } = async () => {
+      try {
+        const response = await fetch('${routePath}');
+        const result = await response.json();
+        if (result.success) {
+          set${
+            tableName.charAt(0).toUpperCase() + tableName.slice(1)
+          }(result.data);
+        }
+      } catch (error) {
+        console.error('Error fetching ${tableName}:', error);
+      }
+    };
+    
+    fetch${tableName.charAt(0).toUpperCase() + tableName.slice(1)}();
+  }, []);`;
+
+    // Replace the constant with useState and add useEffect
+    updatedContent = updatedContent.replace(
+      originalConstant,
+      useStateDeclaration + useEffectCode
+    );
+  }
+
+  return updatedContent;
 }
