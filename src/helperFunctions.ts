@@ -307,14 +307,20 @@ Given the following JavaScript constants (arrays of objects), generate Drizzle O
 IMPORTANT RULES:
 - Use \`uuid('id').primaryKey().defaultRandom()\` for IDs (if they are string-based).
 - Use \`varchar()\` instead of \`text()\` for short string fields like \`title\`, \`artist\`, etc.
-- Use \`notNull()\` for always-present fields, otherwise leave fields optional (no additional parameters).
-- Use appropriate column types: varchar for strings, integer for duration, etc.
+- For optional fields, just use the column type without any additional methods (e.g., \`varchar()\` not \`varchar().optional()\`).
+- For required fields, use \`.notNull()\` method.
+- Use appropriate column types: varchar for strings, integer for numbers, boolean for booleans, etc.
 - MERGE arrays with EXACTLY the same constant name by creating a unified schema that includes ALL fields from both structures.
 - For example, if you have 'recentlyPlayed' with 'subtitle' and another 'recentlyPlayed' with 'artist'/'album', create one table with: id, title, subtitle, artist, album, image, duration.
-- Make fields optional (no .notNull()) if they don't exist in all arrays with the same name.
 - Create SEPARATE tables for different constant names (e.g., 'madeForYou' and 'popularAlbums' should be separate tables).
 - Return only valid TypeScript code with named \`export const\` for each table using \`pgTable\`.
-- Include the import statement: \`import { pgTable, uuid, varchar, integer } from 'drizzle-orm/pg-core';\`
+- Include the import statement: \`import { pgTable, uuid, varchar, integer, boolean, text } from 'drizzle-orm/pg-core';\`
+- DO NOT use \`.optional()\` method - it doesn't exist in Drizzle ORM.
+
+CORRECT SYNTAX EXAMPLES:
+- Required field: \`varchar('title').notNull()\`
+- Optional field: \`varchar('subtitle')\` (no additional methods)
+- Primary key: \`uuid('id').primaryKey().defaultRandom()\`
 
 Analyze each constant array carefully and create separate tables for each unique constant name, merging only arrays with identical names.
 
