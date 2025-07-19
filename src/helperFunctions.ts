@@ -367,3 +367,321 @@ runMigrations().catch(console.error);
     console.log("3. npx tsx src/drizzle/migrate.ts");
   }
 }
+
+// helper function to seed the database with array constants data
+export async function seedDatabase(dir: string, arrayConstants: string[]) {
+  console.log("Seeding the database with extracted data...");
+
+  if (arrayConstants.length === 0) {
+    console.log(
+      "No array constants found. Please run 'imports' command first to extract data."
+    );
+    return;
+  }
+
+  try {
+    // Parse array constants to extract data
+    console.log({ arrayConstants });
+    const parsedData = parseArrayConstants(arrayConstants);
+
+    if (Object.keys(parsedData).length === 0) {
+      console.log("No valid data found to seed the database");
+      return;
+    }
+
+    console.log(`Found ${Object.keys(parsedData).length} tables to seed:`);
+    for (const [tableName, data] of Object.entries(parsedData)) {
+      console.log(`  - ${tableName}: ${data.length} records`);
+    }
+
+    // Generate seed file
+    const seedContent = generateSeedFile(parsedData);
+
+    // Ensure the drizzle directory exists
+    const drizzleDir = `${dir}/src/drizzle`;
+    await fs.mkdir(drizzleDir, { recursive: true });
+
+    // Write seed file
+    await fs.writeFile(drizzleDir + "/seed.ts", seedContent, "utf-8");
+
+    console.log("Seed file generated successfully");
+
+    // Run the seed script
+    console.log("Running database seeding...");
+    execSync("npx tsx src/drizzle/seed.ts", {
+      cwd: dir,
+      stdio: "inherit",
+    });
+    console.log("Database seeded successfully");
+  } catch (error) {
+    console.log("Error during database seeding:", error);
+    console.log("You can manually run the following command:");
+    console.log("npx tsx src/drizzle/seed.ts");
+  }
+}
+
+// Helper function to parse array constants into structured data
+function parseArrayConstants(arrayConstants: string[]): Record<string, any[]> {
+  const parsedData: Record<string, any[]> = {};
+
+  console.log(`Processing ${arrayConstants.length} array constants`);
+
+  for (const constant of arrayConstants) {
+    try {
+      // Extract constant name and array content
+      const constMatch = constant.match(
+        /const\s+(\w+)\s*=\s*(\[.*?\])\s*;?\s*$/s
+      );
+      if (!constMatch || !constMatch[1] || !constMatch[2]) {
+        console.log("Failed to match constant pattern");
+        console.log("Constant string:", constant.substring(0, 100) + "...");
+        continue;
+      }
+
+      const constName = constMatch[1];
+      const arrayContent = constMatch[2];
+
+      console.log(`Parsing constant: ${constName}`);
+      console.log(`Array content length: ${arrayContent.length}`);
+
+      // Try to parse using a more robust approach
+      const extractedArray = extractArrayFromString(arrayContent);
+      if (extractedArray && extractedArray.length > 0) {
+        // Merge with existing data if constant name already exists
+        if (parsedData[constName]) {
+          console.log(`Merging data for existing constant: ${constName}`);
+          parsedData[constName] = [...parsedData[constName], ...extractedArray];
+        } else {
+          parsedData[constName] = extractedArray;
+        }
+        console.log(
+          `Successfully parsed ${extractedArray.length} items for ${constName}`
+        );
+      } else {
+        console.log(`Failed to extract data for ${constName}`);
+      }
+    } catch (error) {
+      console.log(`Error parsing constant: ${error}`);
+    }
+  }
+
+  // Now normalize the data to ensure all records have the same fields
+  const normalizedData: Record<string, any[]> = {};
+
+  for (const [tableName, data] of Object.entries(parsedData)) {
+    console.log(`Normalizing data for ${tableName}...`);
+
+    // Collect all unique field names from all records
+    const allFields = new Set<string>();
+    data.forEach((record) => {
+      Object.keys(record).forEach((key) => allFields.add(key));
+    });
+
+    console.log(`Found fields for ${tableName}:`, Array.from(allFields));
+
+    // Deduplicate records based on id field
+    const uniqueRecords = new Map<string, any>();
+    data.forEach((record) => {
+      const id = record.id;
+      if (id) {
+        if (uniqueRecords.has(id)) {
+          // Merge fields from duplicate records
+          const existingRecord = uniqueRecords.get(id);
+          const mergedRecord = { ...existingRecord };
+
+          // Update with non-null values from the new record
+          Object.keys(record).forEach((key) => {
+            if (record[key] !== null && record[key] !== undefined) {
+              mergedRecord[key] = record[key];
+            }
+          });
+
+          uniqueRecords.set(id, mergedRecord);
+          console.log(`Merged duplicate record with id ${id}`);
+        } else {
+          uniqueRecords.set(id, record);
+        }
+      } else {
+        // If no id, just add the record
+        uniqueRecords.set(`no-id-${Date.now()}-${Math.random()}`, record);
+      }
+    });
+
+    // Normalize each record to include all fields
+    const normalizedRecords = Array.from(uniqueRecords.values()).map(
+      (record) => {
+        const normalizedRecord: any = {};
+        allFields.forEach((field) => {
+          normalizedRecord[field] = record[field] || null; // Use null for missing fields
+        });
+        return normalizedRecord;
+      }
+    );
+
+    normalizedData[tableName] = normalizedRecords;
+    console.log(
+      `Normalized ${normalizedRecords.length} unique records for ${tableName}`
+    );
+  }
+
+  console.log(`Final parsed data keys:`, Object.keys(normalizedData));
+  return normalizedData;
+}
+
+// Helper function to extract array data from string when JSON parsing fails
+function extractArrayFromString(arrayString: string): any[] {
+  try {
+    // Try to evaluate the array string as JavaScript
+    // This is safer than eval() and can handle JavaScript object syntax
+    const arrayData = new Function(`return ${arrayString}`)();
+
+    if (Array.isArray(arrayData)) {
+      console.log(
+        `Successfully extracted ${arrayData.length} objects using Function constructor`
+      );
+      return arrayData;
+    } else {
+      console.log("Extracted data is not an array");
+      return [];
+    }
+  } catch (error) {
+    console.log(`Function constructor failed: ${error}`);
+
+    // Fallback to manual parsing
+    return extractArrayManually(arrayString);
+  }
+}
+
+// Fallback manual parsing function
+function extractArrayManually(arrayString: string): any[] {
+  const objects: any[] = [];
+  let currentObject = "";
+  let braceCount = 0;
+  let inString = false;
+  let escapeNext = false;
+  let inArray = false;
+
+  for (let i = 0; i < arrayString.length; i++) {
+    const char = arrayString[i];
+
+    if (escapeNext) {
+      currentObject += char;
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escapeNext = true;
+      currentObject += char;
+      continue;
+    }
+
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+    }
+
+    if (!inString) {
+      if (char === "[") {
+        inArray = true;
+        continue;
+      } else if (char === "]") {
+        inArray = false;
+        break;
+      } else if (char === "{") {
+        braceCount++;
+        if (braceCount === 1) {
+          currentObject = "{";
+          continue;
+        }
+      } else if (char === "}") {
+        braceCount--;
+        if (braceCount === 0) {
+          // End of object
+          currentObject += "}";
+          try {
+            // Try to evaluate the object as JavaScript
+            const parsedObj = new Function(`return ${currentObject}`)();
+            objects.push(parsedObj);
+            console.log(`Successfully parsed object manually:`, parsedObj);
+          } catch (e) {
+            console.log(`Failed to parse object manually: ${currentObject}`);
+            console.log(`Error:`, e);
+          }
+          currentObject = "";
+          continue;
+        }
+      }
+    }
+
+    if (braceCount > 0) {
+      currentObject += char;
+    }
+  }
+
+  console.log(`Manually extracted ${objects.length} objects from array string`);
+  return objects;
+}
+
+// Helper function to generate the seed file content
+function generateSeedFile(parsedData: Record<string, any[]>): string {
+  let seedContent = `import dotenv from "dotenv";
+dotenv.config({path: ".env"});
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "./schema";
+
+const client = postgres(process.env.DATABASE_URL as string);
+const db = drizzle(client, { schema, logger: true });
+
+async function seedDatabase() {
+  try {
+    console.log("Starting database seeding...");
+`;
+
+  // Generate insert statements for each table
+  for (const [tableName, data] of Object.entries(parsedData)) {
+    if (data.length === 0) continue;
+
+    // Convert table name to camelCase for schema reference
+    const schemaTableName =
+      tableName.charAt(0).toLowerCase() + tableName.slice(1);
+
+    // Remove 'id' field from data since schema auto-generates UUIDs
+    const dataWithoutId = data.map((item) => {
+      const { id, ...itemWithoutId } = item;
+      return itemWithoutId;
+    });
+
+    seedContent += `
+    // Seeding ${tableName} table
+    console.log(\`Seeding \${${
+      dataWithoutId.length
+    }} records into ${tableName} table...\`);
+    const ${tableName}Data = ${JSON.stringify(dataWithoutId, null, 4)};
+    
+    for (const record of ${tableName}Data) {
+      try {
+        await db.insert(schema.${schemaTableName}).values(record);
+      } catch (error) {
+        console.log(\`Error inserting record into ${tableName}:\`, error);
+      }
+    }
+    console.log(\`${tableName} table seeded successfully\`);
+`;
+  }
+
+  seedContent += `
+    console.log("Database seeding completed successfully");
+  } catch (error) {
+    console.error("Error during seeding:", error);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+seedDatabase().catch(console.error);
+`;
+
+  return seedContent;
+}

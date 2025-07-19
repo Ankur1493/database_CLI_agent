@@ -5,6 +5,7 @@ import {
   drizzleOrmSetup,
   generateDrizzleSchema,
   getDataset,
+  seedDatabase,
 } from "./helperFunctions";
 
 // const program = new Command();
@@ -28,10 +29,12 @@ function promptForProjectPath() {
 function showHelp() {
   console.log("\nAvailable commands:");
   console.log("  ls       - List directory contents");
-  console.log("  imports  - Get imports");
+  console.log("  imports  - Get imports (extract data from components)");
   console.log("  drizzle  - Check drizzle config");
   console.log("  schema   - Generate drizzle orm schema");
+  console.log("  seed     - Seed the database with extracted data");
   console.log("  exit     - Exit the CLI\n");
+  console.log("Workflow: imports → drizzle → schema → seed");
 }
 
 // program
@@ -79,6 +82,9 @@ rl.on("line", async (line) => {
         break;
       case "schema":
         await generateDrizzleSchema(projectPath, dataset);
+        break;
+      case "seed":
+        await seedDatabase(projectPath, dataset);
         break;
       default:
         console.log("Unknown command");
