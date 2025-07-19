@@ -6,6 +6,7 @@ import {
   generateDrizzleSchema,
   getDataset,
   seedDatabase,
+  getParsedData,
 } from "./helperFunctions";
 
 // const program = new Command();
@@ -30,6 +31,7 @@ function showHelp() {
   console.log("\nAvailable commands:");
   console.log("  ls       - List directory contents");
   console.log("  imports  - Get imports (extract data from components)");
+  console.log("  data     - View extracted data from data.json");
   console.log("  drizzle  - Check drizzle config");
   console.log("  schema   - Generate drizzle orm schema");
   console.log("  seed     - Seed the database with extracted data");
@@ -48,8 +50,6 @@ function showHelp() {
 //   .option("-q, --query <query>", "Query the database");
 
 // promptForProjectPath();
-
-const dataset: string[] = [];
 
 rl.on("line", async (line) => {
   const input = line.trim();
@@ -73,18 +73,28 @@ rl.on("line", async (line) => {
         await accessProject(projectPath);
         break;
       case "imports":
-        //we can later store the data in a json file
-        const data = await getDataset(projectPath);
-        dataset.push(...data);
+        await getDataset(projectPath);
+        break;
+      case "data":
+        const parsedData = await getParsedData(projectPath);
+        if (Object.keys(parsedData).length > 0) {
+          console.log("\nExtracted data summary:");
+          for (const [tableName, data] of Object.entries(parsedData)) {
+            console.log(`\n${tableName} (${data.length} records):`);
+            if (data.length > 0) {
+              console.log("Sample record:", JSON.stringify(data[0], null, 2));
+            }
+          }
+        }
         break;
       case "drizzle":
         await drizzleOrmSetup(projectPath);
         break;
       case "schema":
-        await generateDrizzleSchema(projectPath, dataset);
+        await generateDrizzleSchema(projectPath);
         break;
       case "seed":
-        await seedDatabase(projectPath, dataset);
+        await seedDatabase(projectPath);
         break;
       default:
         console.log("Unknown command");

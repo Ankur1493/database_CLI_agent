@@ -225,16 +225,81 @@ export async function getDataset(dir: string) {
       }
     }
   }
+
+  // Parse the array constants and save to data.json
+  if (arrayConstants.length > 0) {
+    console.log("Parsing extracted data and saving to data.json...");
+    const parsedData = parseArrayConstants(arrayConstants);
+
+    if (Object.keys(parsedData).length > 0) {
+      // Save the parsed data to data.json
+      const dataFilePath = `${dir}/data.json`;
+      await fs.writeFile(
+        dataFilePath,
+        JSON.stringify(parsedData, null, 2),
+        "utf-8"
+      );
+      console.log(`Data saved to ${dataFilePath}`);
+
+      // Log summary of extracted data
+      console.log(`\nExtracted data summary:`);
+      for (const [tableName, data] of Object.entries(parsedData)) {
+        console.log(`  - ${tableName}: ${data.length} records`);
+      }
+    } else {
+      console.log("No valid data found to save");
+    }
+  }
+
   return arrayConstants;
 }
 
+// helper function to read parsed data from data.json
+export async function getParsedData(
+  dir: string
+): Promise<Record<string, any[]>> {
+  try {
+    const dataFilePath = `${dir}/data.json`;
+    const dataContent = await fs.readFile(dataFilePath, "utf-8");
+    const parsedData = JSON.parse(dataContent);
+    console.log(`Loaded data from ${dataFilePath}`);
+    console.log(`Found ${Object.keys(parsedData).length} tables with data`);
+
+    return parsedData;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("ENOENT")) {
+      console.log(
+        "No data.json file found. Please run 'imports' command first to extract data."
+      );
+    } else {
+      console.log("Error reading data.json:", error);
+    }
+    return {};
+  }
+}
+
 // helper function to generate the drizzle orm schema
-export async function generateDrizzleSchema(
-  dir: string,
-  arrayConstants: string[]
-) {
-  // we'll use this prompt inside the agent code to do all this automatically-
+export async function generateDrizzleSchema(dir: string) {
   console.log("generating the drizzle orm schema...");
+
+  // Get parsed data from data.json
+  const parsedData = await getParsedData(dir);
+
+  if (Object.keys(parsedData).length === 0) {
+    console.log(
+      "No data found. Please run 'imports' command first to extract data."
+    );
+    return;
+  }
+
+  // Convert parsed data back to array constants format for the AI prompt
+  const arrayConstants: string[] = [];
+  for (const [tableName, data] of Object.entries(parsedData)) {
+    const arrayContent = JSON.stringify(data, null, 2);
+    const fullConstant = `const ${tableName} = ${arrayContent};`;
+    arrayConstants.push(fullConstant);
+  }
+
   const prompt = `
       You are a TypeScript and Drizzle ORM expert. 
 Given the following JavaScript constants (arrays of objects), generate Drizzle ORM schema definitions in TypeScript using PostgreSQL:
@@ -369,26 +434,20 @@ runMigrations().catch(console.error);
 }
 
 // helper function to seed the database with array constants data
-export async function seedDatabase(dir: string, arrayConstants: string[]) {
+export async function seedDatabase(dir: string) {
   console.log("Seeding the database with extracted data...");
 
-  if (arrayConstants.length === 0) {
+  // Get parsed data from data.json
+  const parsedData = await getParsedData(dir);
+
+  if (Object.keys(parsedData).length === 0) {
     console.log(
-      "No array constants found. Please run 'imports' command first to extract data."
+      "No data found. Please run 'imports' command first to extract data."
     );
     return;
   }
 
   try {
-    // Parse array constants to extract data
-    console.log({ arrayConstants });
-    const parsedData = parseArrayConstants(arrayConstants);
-
-    if (Object.keys(parsedData).length === 0) {
-      console.log("No valid data found to seed the database");
-      return;
-    }
-
     console.log(`Found ${Object.keys(parsedData).length} tables to seed:`);
     for (const [tableName, data] of Object.entries(parsedData)) {
       console.log(`  - ${tableName}: ${data.length} records`);
