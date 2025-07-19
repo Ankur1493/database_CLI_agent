@@ -1162,14 +1162,13 @@ async function generateFrontendFetchCalls(
 
   // Update all source files that contain this constant
   for (const sourceFile of sourceFiles) {
-    console.log(`🔄 Updating ${sourceFile}...`);
+    console.log(`🔄 Updating ${sourceFile} with GPT...`);
 
     try {
       // Read the source file
       const fileContent = await fs.readFile(sourceFile, "utf-8");
 
-      // Find the constant declaration for this table
-      // First, let's check if the constant name exists in the file
+      // Check if the constant name exists in the file
       if (!fileContent.includes(tableName)) {
         console.log(
           `❌ Constant name "${tableName}" not found in ${sourceFile}`
@@ -1177,161 +1176,131 @@ async function generateFrontendFetchCalls(
         continue;
       }
 
-      // Try multiple regex patterns to find the constant declaration
-      let constMatch = null;
-      const patterns = [
-        // Pattern 1: const name = [array];
-        new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\];`, "g"),
-        // Pattern 2: const name = [array] (without semicolon)
-        new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\]`, "g"),
-        // Pattern 3: const name: type = [array];
-        new RegExp(
-          `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\];`,
-          "g"
-        ),
-        // Pattern 4: const name: type = [array] (without semicolon)
-        new RegExp(
-          `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\]`,
-          "g"
-        ),
-      ];
-
-      for (const pattern of patterns) {
-        constMatch = fileContent.match(pattern);
-        if (constMatch) {
-          console.log(`✅ Found constant using pattern: ${pattern.source}`);
-          break;
-        }
-      }
-
-      if (!constMatch) {
-        console.log(
-          `❌ Could not find constant declaration for ${tableName} in ${sourceFile}`
-        );
-        console.log(
-          `🔍 Debug: File contains "${tableName}" but no matching declaration pattern`
-        );
-        // Let's show a snippet around where the constant name appears
-        const nameIndex = fileContent.indexOf(tableName);
-        if (nameIndex !== -1) {
-          const start = Math.max(0, nameIndex - 50);
-          const end = Math.min(fileContent.length, nameIndex + 50);
-          console.log(
-            `🔍 Context around "${tableName}": "${fileContent.substring(
-              start,
-              end
-            )}"`
-          );
-        }
-        continue; // Skip this file and continue with others
-      }
-
-      // Generate the updated code with useEffect and fetch
-      const updatedCode = generateUpdatedComponentCode(
+      // Use GPT to update the file
+      const updatedCode = await generateUpdatedComponentCodeWithGPT(
         fileContent,
         tableName,
-        routePath
+        routePath,
+        sourceFile
       );
 
-      // Write the updated file
-      await fs.writeFile(sourceFile, updatedCode, "utf-8");
-      console.log(`✅ Updated ${sourceFile} with fetch calls for ${tableName}`);
+      if (updatedCode) {
+        // Write the updated file
+        await fs.writeFile(sourceFile, updatedCode, "utf-8");
+        console.log(
+          `✅ Updated ${sourceFile} with fetch calls for ${tableName}`
+        );
+      } else {
+        console.log(
+          `❌ Failed to update ${sourceFile} - no content returned from GPT`
+        );
+      }
     } catch (error) {
       console.log(`❌ Error updating frontend file ${sourceFile}: ${error}`);
     }
   }
 }
 
-function generateUpdatedComponentCode(
+async function generateUpdatedComponentCodeWithGPT(
   fileContent: string,
   tableName: string,
-  routePath: string
-): string {
-  // Add "use client" directive if not present
-  let updatedContent = fileContent;
-  if (!fileContent.includes('"use client"')) {
-    updatedContent = '"use client";\n\n' + fileContent;
-  }
+  routePath: string,
+  sourceFile: string
+): Promise<string> {
+  console.log(`🤖 Using GPT to update ${sourceFile} for ${tableName}...`);
 
-  // Add useState and useEffect imports if not present
-  if (!fileContent.includes("useState") && !fileContent.includes("useEffect")) {
-    const importMatch = fileContent.match(
-      /import\s+\{[^}]*\}\s+from\s+['"]react['"]/
-    );
-    if (importMatch) {
-      // Add to existing React import
-      updatedContent = updatedContent.replace(
-        /import\s+\{([^}]*)\}\s+from\s+['"]react['"]/,
-        'import { $1, useState, useEffect } from "react"'
-      );
-    } else {
-      // Add new React import
-      updatedContent =
-        'import { useState, useEffect } from "react";\n\n' + updatedContent;
-    }
-  }
+  const prompt = `
+You are a React/Next.js expert. I need you to update a component file to replace a static data constant with dynamic data fetching from an API.
 
-  // Find the constant declaration and replace it with useState
-  // Try multiple regex patterns to find the constant declaration
-  let constMatch = null;
-  const patterns = [
-    // Pattern 1: const name = [array];
-    new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\];`, "g"),
-    // Pattern 2: const name = [array] (without semicolon)
-    new RegExp(`const\\s+${tableName}\\s*=\\s*\\[[\\s\\S]*?\\]`, "g"),
-    // Pattern 3: const name: type = [array];
-    new RegExp(
-      `const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\];`,
-      "g"
-    ),
-    // Pattern 4: const name: type = [array] (without semicolon)
-    new RegExp(`const\\s+${tableName}\\s*:\\s*[^=]*=\\s*\\[[\\s\\S]*?\\]`, "g"),
-  ];
+TASK:
+Find the constant named "${tableName}" in the file and replace it with:
+1. A useState hook to store the data
+2. A useEffect hook to fetch data from the API endpoint: "${routePath}"
+3. Also add a conditional check to see if the data is already fetched, if it is, include loading and error jsx for that too if not there
+4. Don't change anything else apart from the updating the constant to a dynamic data
 
-  for (const pattern of patterns) {
-    constMatch = updatedContent.match(pattern);
-    if (constMatch) {
-      console.log(
-        `✅ Found constant for replacement using pattern: ${pattern.source}`
-      );
-      break;
-    }
-  }
+REQUIREMENTS:
+1. Add "use client" directive at the top if not present
+2. Import useState and useEffect from React if not already imported
+3. Replace the constant declaration with useState
+4. Add useEffect to fetch data from the API
+5. Handle loading states and errors appropriately
+6. Maintain all existing functionality and styling
+7. Keep the same variable name "${tableName}" for consistency
 
-  if (constMatch) {
-    const originalConstant = constMatch[0];
-    const useStateDeclaration = `const [${tableName}, set${
-      tableName.charAt(0).toUpperCase() + tableName.slice(1)
-    }] = useState([]);`;
+API RESPONSE FORMAT:
+The API returns: { success: boolean, data: any[] }
 
-    // Add useEffect after the useState declaration
-    const useEffectCode = `
-  useEffect(() => {
-    const fetch${
-      tableName.charAt(0).toUpperCase() + tableName.slice(1)
-    } = async () => {
-      try {
-        const response = await fetch('${routePath}');
-        const result = await response.json();
-        if (result.success) {
-          set${
-            tableName.charAt(0).toUpperCase() + tableName.slice(1)
-          }(result.data);
-        }
-      } catch (error) {
-        console.error('Error fetching ${tableName}:', error);
+EXAMPLE TRANSFORMATION:
+Before:
+const ${tableName} = [
+  { id: 1, title: "Song 1", artist: "Artist 1" },
+  { id: 2, title: "Song 2", artist: "Artist 2" }
+];
+
+After:
+const [${tableName}, set${
+    tableName.charAt(0).toUpperCase() + tableName.slice(1)
+  }] = useState([]);
+
+useEffect(() => {
+  const fetch${
+    tableName.charAt(0).toUpperCase() + tableName.slice(1)
+  } = async () => {
+    try {
+      const response = await fetch('${routePath}');
+      const result = await response.json();
+      if (result.success) {
+        set${
+          tableName.charAt(0).toUpperCase() + tableName.slice(1)
+        }(result.data);
       }
-    };
-    
-    fetch${tableName.charAt(0).toUpperCase() + tableName.slice(1)}();
-  }, []);`;
+    } catch (error) {
+      console.error('Error fetching ${tableName}:', error);
+    }
+  };
+  
+  fetch${tableName.charAt(0).toUpperCase() + tableName.slice(1)}();
+}, []);
 
-    // Replace the constant with useState and add useEffect
-    updatedContent = updatedContent.replace(
-      originalConstant,
-      useStateDeclaration + useEffectCode
-    );
+IMPORTANT:
+- Return ONLY the complete updated file content
+- Do not include any explanations or markdown formatting
+- Preserve all existing code structure and formatting
+- Make sure the component still works exactly the same way
+- If the constant is not found, return the original file content unchanged
+
+FILE CONTENT:
+${fileContent}
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a React/Next.js expert who updates component files to use dynamic data fetching instead of static constants. You return only the complete updated file content without any explanations.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const updatedContent = response.choices[0]?.message?.content ?? "";
+
+    if (!updatedContent.trim()) {
+      console.log(`❌ No content returned from GPT for ${sourceFile}`);
+      return fileContent; // Return original content if GPT fails
+    }
+
+    console.log(`✅ GPT successfully updated ${sourceFile}`);
+    return updatedContent;
+  } catch (error) {
+    console.log(`❌ Error calling GPT for ${sourceFile}:`, error);
+    return fileContent; // Return original content if GPT fails
   }
-
-  return updatedContent;
 }
