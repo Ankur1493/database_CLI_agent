@@ -12,29 +12,6 @@ To run:
 bun run index.ts
 ```
 
-## CLI Usage
-
-The CLI provides an interactive interface for database setup and seeding. Here's the workflow:
-
-1. **Start the CLI**: `bun run index.ts`
-2. **Enter project path**: When prompted, enter the path to your Next.js project
-3. **Use commands in sequence**:
-   - `imports` - Extract data constants from your components
-   - `drizzle` - Setup Drizzle ORM if not already configured
-   - `schema` - Generate database schema from extracted data
-   - `seed` - Seed the database with the extracted data
-
-### Example Workflow:
-
-```
-> Please enter the project path: /path/to/your/nextjs-project
-> imports
-> drizzle
-> schema
-> seed
-> exit
-```
-
 This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
 
 # Phases for development

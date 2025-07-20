@@ -219,25 +219,12 @@ promptForProjectPath();
 function showHelp() {
   console.log("\nSample Commands:");
   console.log("  ai        - AI Agent: Let AI handle the workflow");
+  console.log("             Example: ai create API for products");
   console.log("             Example: ai store recently played music");
-  console.log("             Example: ai create API for recently played songs");
   console.log(
-    "  validate  - Validate if a request can be fulfilled with available data"
+    "             Example: ai store popular albums and made for you songs"
   );
-  console.log("             Example: validate store recently played music");
-  console.log(
-    "             Example: validate create API for ecommerce products"
-  );
-  console.log("  schema-for - Generate schema for specific tables");
-  console.log("             Example: schema-for recentlyPlayed");
-  console.log("             Example: schema-for recentlyPlayed popularAlbums");
-  console.log("  seed-for   - Seed specific tables");
-  console.log("             Example: seed-for recentlyPlayed");
-  console.log("             Example: seed-for recentlyPlayed popularAlbums");
-  console.log("  api-for    - Generate API routes for specific tables");
-  console.log("             Example: api-for products");
-  console.log("             Example: api-for products teams");
-  console.log("  status     - Show status of all tables (schema/seeded)\n");
+  console.log("             Example: ai create API for products and teams");
   console.log("  exit      - Exit the CLI\n");
 }
 
