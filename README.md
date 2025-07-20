@@ -73,8 +73,8 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 ## 7. API Route Generation
 
-- [] Create `GET` route using Drizzle to fetch from DB
-- [] Save to `/app/api/<table>/route.ts`
+- [x] Create `GET` route using Drizzle to fetch from DB
+- [x] Save to `/app/api/<table>/route.ts`
 
 ## 8. Migrations & DB Setup
 
@@ -85,5 +85,5 @@ This project was created using `bun init` in bun v1.2.5. [Bun](https://bun.sh) i
 
 **Bonus section, will do if get time**
 
-- [] Locate constant usage in frontend
-- [] Replace with `useState` + `useEffect` + `fetch('/api/...')`
+- [x] Locate constant usage in frontend
+- [x] Replace with `useState` + `useEffect` + `fetch('/api/...')`
