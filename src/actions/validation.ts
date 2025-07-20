@@ -26,23 +26,22 @@ export async function validateUserRequest(dir: string, userQuery: string) {
   );
   console.log("Available tables:", availableTables);
 
-  // Create a summary of available data for validation
-  const dataSummary = availableTables.map((tableName) => {
+  // Send the actual extracted data for better validation
+  const actualData = availableTables.map((tableName) => {
     const dataInfo = parsedData[tableName];
     if (!dataInfo) {
       return {
         tableName,
         recordCount: 0,
-        sampleFields: [],
-        sampleData: {},
+        fields: [],
+        data: [],
       };
     }
-    const sampleRecord = dataInfo.data.length > 0 ? dataInfo.data[0] : {};
     return {
       tableName,
       recordCount: dataInfo.data.length,
-      sampleFields: Object.keys(sampleRecord),
-      sampleData: sampleRecord,
+      fields: dataInfo.data.length > 0 ? Object.keys(dataInfo.data[0]) : [],
+      data: dataInfo.data, // Send the actual data instead of just a sample
     };
   });
 
@@ -57,7 +56,7 @@ export async function validateUserRequest(dir: string, userQuery: string) {
         },
         {
           role: "user",
-          content: VALIDATION_PROMPT(userQuery, dataSummary),
+          content: VALIDATION_PROMPT(userQuery, actualData),
         },
       ],
     });

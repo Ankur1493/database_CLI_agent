@@ -23,9 +23,10 @@ Available actions:
 - check-drizzle: Check and install drizzle ORM if missing -- this is always the first action you should take if users says setup database this is what you need to do returns true if drizzle is installed and false if it fails to install. Use "project_path" as input.
 - extract-data: Extract data from components and save to data.json -- this is the step where the function extracts data from user's project - you only need to run this if user asks you to create schema/api or seed database. Use "project_path" as input.
 - validate-request: Validate user request against available data -- this step runs after extract-data to check if the user's request can be fulfilled with the available data. Returns "VALID: [explanation]" or "INVALID: [reason]". Use "project_path" as input.
-- generate-schema: Generate Drizzle ORM schema from extracted data -- This generates the schema based on the data extracted from the user's project - do this only if user asks to either store some data  or create an api route. Use "project_path" as input.
-- seed-database: Seed the database with extracted data -- this is the step which we run when user says store data or create an api route - we never run this step more than once in our whole journey. Use "project_path" as input.
+- generate-schema-for-tables: Generate Drizzle ORM schema for specific tables only -- This generates the schema based on the data extracted from the user's project. Use "table_name" as input to specify which table to generate schema for (e.g., "recentlyPlayed"). If no table name provided, it will generate schema for all tables that need it.
+- seed-specific-tables: Seed specific tables with extracted data -- this is the step which we run when user says store data or create an api route. Use "table_name" as input to specify which table to seed (e.g., "recentlyPlayed"). If no table name provided, it will seed all tables that need seeding.
 - generate-api: Generate a Next.js API route using GPT (for specific queries like "create API for recently played songs") -- this is the step where we generate the api route based on the user's query. Use "project_path" as input.
+- generate-api-for-tables: Generate Next.js API routes for specific tables (for queries like "create API for products and teams") -- this generates separate API routes for each specified table. Use "project_path" as input.
 
 Example:
 
@@ -48,13 +49,13 @@ START
 {type: "plan", "plan": "I need to run validate-request to check if the user's request is valid"}
 {type: "action", "function": "validate-request", "input": "project_path"}
 {type: "observation", "observation": "VALID: Can store recently played music using the recentlyPlayed table"}
-{type: "plan", "plan": "I need to run generate-schema to generate schema from extracted data"}
-{type: "action", "function": "generate-schema", "input": "project_path"}
-{type: "observation", "observation": "schema generated successfully"}
-{type: "plan", "plan": "I need to run seed-database to seed the database with extracted data"}
-{type: "action", "function": "seed-database", "input": "project_path"}
-{type: "observation", "observation": "database seeded successfully"}
-{type: "output", "output": "Database is setup and data is stored successfully"}
+{type: "plan", "plan": "I need to run generate-schema-for-tables to generate schema for recentlyPlayed table"}
+{type: "action", "function": "generate-schema-for-tables", "input": "recentlyPlayed"}
+{type: "observation", "observation": "schema generated successfully for recentlyPlayed"}
+{type: "plan", "plan": "I need to run seed-specific-tables to seed the recentlyPlayed table"}
+{type: "action", "function": "seed-specific-tables", "input": "recentlyPlayed"}
+{type: "observation", "observation": "database seeded successfully for recentlyPlayed"}
+{type: "output", "output": "Database is setup and recentlyPlayed data is stored successfully"}
 END
 
 START
@@ -68,16 +69,16 @@ START
 {type: "plan", "plan": "I need to run validate-request to check if the user's request is valid"}
 {type: "action", "function": "validate-request", "input": "project_path"}
 {type: "observation", "observation": "VALID: Can create API for recently played songs using the recentlyPlayed table"}
-{type: "plan", "plan": "I need to run generate-schema to generate schema from extracted data"}
-{type: "action", "function": "generate-schema", "input": "project_path"}
-{type: "observation", "observation": "schema generated successfully"}
-{type: "plan", "plan": "I need to run seed-database to seed the database with extracted data"}
-{type: "action", "function": "seed-database", "input": "project_path"}
-{type: "observation", "observation": "database seeded successfully"}
+{type: "plan", "plan": "I need to run generate-schema-for-tables to generate schema for recentlyPlayed table"}
+{type: "action", "function": "generate-schema-for-tables", "input": "recentlyPlayed"}
+{type: "observation", "observation": "schema generated successfully for recentlyPlayed"}
+{type: "plan", "plan": "I need to run seed-specific-tables to seed the recentlyPlayed table"}
+{type: "action", "function": "seed-specific-tables", "input": "recentlyPlayed"}
+{type: "observation", "observation": "database seeded successfully for recentlyPlayed"}
 {type: "plan", "plan": "I need to run generate-api to generate an api route for recently played songs"}
 {type: "action", "function": "generate-api", "input": "project_path"}
 {type: "observation", "observation": "api route generated successfully"}
-{type: "output", "output": "API route is generated successfully"}
+{type: "output", "output": "API route is generated successfully for recentlyPlayed"}
 END
 
 START
@@ -321,20 +322,20 @@ Analyze each constant array carefully and create separate tables for each unique
 Dataset:
 ${arrayConstants.join("\n")}      `;
 
-export const VALIDATION_PROMPT = (userQuery: string, dataSummary: any[]) => `
+export const VALIDATION_PROMPT = (userQuery: string, actualData: any[]) => `
 You are a data validation expert. Your task is to evaluate if the user's request can be fulfilled using the available data tables.
 
 USER REQUEST:
 "${userQuery}"
 
 AVAILABLE DATA TABLES:
-${dataSummary
+${actualData
   .map(
     (table) => `
 - Table Name: ${table.tableName} (${table.recordCount} records)
-  Fields: ${table.sampleFields.join(", ")}
-  Sample Data:
-${JSON.stringify(table.sampleData, null, 2)}`
+  Fields: ${table.fields.join(", ")}
+  Actual Data:
+${JSON.stringify(table.data, null, 2)}`
   )
   .join("\n")}
 
@@ -353,8 +354,11 @@ GUIDELINES:
    - "current songs" → maps to "recentlyPlayed" table
    - "music history" → maps to "recentlyPlayed" table
    - "popular music" → maps to "popularAlbums" table
+   - "popular albums" → maps to "popularAlbums" table
    - "recommended music" → maps to "madeForYou" table
    - "personalized music" → maps to "madeForYou" table
+   - "made for you" → maps to "madeForYou" table
+   - "recommendations" → maps to "madeForYou" table
 4. Common API creation patterns to accept:
    - "create API for [tableName]" → VALID if table exists
    - "build API for [tableName]" → VALID if table exists  
@@ -364,6 +368,7 @@ GUIDELINES:
 5. Use semantic understanding and synonyms (e.g., "products" ≈ "product", "users" ≈ "user", "members" ≈ "teamMembers").
 6. Prefer being helpful and flexible — do not reject valid requests due to minor naming differences or ambiguous phrasing.
 7. If the user query semantically matches a table's purpose (like "songs" matching "recentlyPlayed"), consider it VALID.
+8. Be EXTREMELY GENEROUS with music-related terms - if the user mentions any music-related concept that could reasonably map to an existing table, accept it.
 
 RESPONSE FORMAT:
 - If VALID: "VALID: [brief explanation of how the data supports the request]"
@@ -379,23 +384,32 @@ EXAMPLES:
 3. User: "store recently played music"
    Available: "recentlyPlayed" table → VALID: 'recentlyPlayed' table supports storing music history.
 
-4. User: "store products"
+4. User: "store popular albums"
+   Available: "popularAlbums" table → VALID: 'popularAlbums' table supports storing popular album data.
+
+5. User: "store popular music"
+   Available: "popularAlbums" table → VALID: 'popularAlbums' table supports storing popular music data.
+
+6. User: "store products"
    Available: "products" table → VALID: 'products' table supports storing product data.
 
-5. User: "store products table"
+7. User: "store products table"
    Available: "products" table → VALID: 'products' table supports storing product data.
 
-6. User: "create API for recently played music"
+8. User: "create API for recently played music"
    Available: "recentlyPlayed" table → VALID: 'recentlyPlayed' table supports music API creation.
 
-7. User: "build API for users"
+9. User: "build API for users"
    Available: "artists" table → INVALID: No user-related data found; only artist data available.
 
-8. User: "create API for orders"
-   Available: "products" table → INVALID: No order-related data available; only product data found.
+10. User: "create API for orders"
+    Available: "products" table → INVALID: No order-related data available; only product data found.
 
-9. User: "store schema for recently played music"
-   Available: "recentlyPlayed" table → VALID: 'recentlyPlayed' table supports storing music data.
+11. User: "store schema for recently played music"
+    Available: "recentlyPlayed" table → VALID: 'recentlyPlayed' table supports storing music data.
 
-Use clear reasoning based on table names, field names, and data samples. Be practical and helpful. Interpret user intent generously rather than being overly strict about phrasing. Use semantic matching to connect user requests to appropriate tables.
+12. User: "store made for you"
+    Available: "madeForYou" table → VALID: 'madeForYou' table supports storing personalized recommendations.
+
+Use clear reasoning based on table names, field names, and data samples. Be practical and helpful. Interpret user intent generously rather than being overly strict about phrasing. Use semantic matching to connect user requests to appropriate tables. When in doubt, favor accepting the request if there's any reasonable semantic match.
 `;

@@ -6,6 +6,16 @@ import {
   parseArrayConstants,
 } from "../helperFunctions";
 
+// Type for table data with status
+type TableDataWithStatus = {
+  data: any[];
+  sourceFiles: string[];
+  status?: {
+    schemaGenerated?: boolean;
+    seeded?: boolean;
+  };
+};
+
 // Helper function to recursively find all page.tsx files in app directory
 async function findAllPageFiles(dir: string): Promise<string[]> {
   const pageFiles: string[] = [];
@@ -163,11 +173,26 @@ export async function getDataset(dir: string) {
       const parsedData = parseArrayConstants(allArrayConstants, allSourceFiles);
 
       if (Object.keys(parsedData).length > 0) {
+        // Initialize status for each table
+        const parsedDataWithStatus = parsedData as Record<
+          string,
+          TableDataWithStatus
+        >;
+        for (const tableName of Object.keys(parsedDataWithStatus)) {
+          const tableData = parsedDataWithStatus[tableName];
+          if (tableData && !tableData.status) {
+            tableData.status = {
+              schemaGenerated: false,
+              seeded: false,
+            };
+          }
+        }
+
         // Save the parsed data to data.json
         const dataFilePath = `${dir}/data.json`;
         await fs.writeFile(
           dataFilePath,
-          JSON.stringify(parsedData, null, 2),
+          JSON.stringify(parsedDataWithStatus, null, 2),
           "utf-8"
         );
         console.log(`Data saved to ${dataFilePath}`);

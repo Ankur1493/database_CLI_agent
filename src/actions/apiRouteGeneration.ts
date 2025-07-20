@@ -7,6 +7,58 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Action: Generate API routes for specific tables
+export async function generateAPIRouteForTables(
+  dir: string,
+  tableNames: string[]
+) {
+  console.log(`Generating API routes for tables: ${tableNames.join(", ")}`);
+
+  // Get parsed data from data.json
+  const parsedData = await getParsedData(dir);
+
+  if (Object.keys(parsedData).length === 0) {
+    console.log(
+      "No data found. Please run 'imports' command first to extract data."
+    );
+    return "No data found - please run extract-data first";
+  }
+
+  // Read the schema file
+  let schemaContent = "";
+  try {
+    schemaContent = await fs.readFile(`${dir}/src/drizzle/schema.ts`, "utf-8");
+  } catch (error) {
+    console.log("Error reading schema file:", error);
+    return "Error reading schema file - please run generate-schema first";
+  }
+
+  const results: string[] = [];
+
+  // Generate API route for each table
+  for (const tableName of tableNames) {
+    console.log(`\n🔄 Generating API route for table: ${tableName}`);
+
+    if (!parsedData[tableName]) {
+      console.log(`❌ Table ${tableName} not found in extracted data`);
+      results.push(`Failed: Table ${tableName} not found`);
+      continue;
+    }
+
+    const userQuery = `create API for ${tableName}`;
+    const result = await generateAPIRouteWithGPT(
+      dir,
+      userQuery,
+      schemaContent,
+      parsedData
+    );
+
+    results.push(result || `Failed to generate API for ${tableName}`);
+  }
+
+  return results.join("\n");
+}
+
 // Action: Generate API routes
 export async function generateAPIRoute(dir: string, userQuery?: string) {
   console.log("Generating API routes...");
@@ -207,7 +259,7 @@ async function generateAPIRouteWithGPT(
       console.log(
         `📊 Total API routes tracked: ${existingData.apiRoutes.length}`
       );
-      generateFrontendFetchCalls(
+      await generateFrontendFetchCalls(
         dir,
         apiRouteDetails.routePath,
         apiRouteDetails.tableUsed,

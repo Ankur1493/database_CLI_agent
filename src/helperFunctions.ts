@@ -92,10 +92,18 @@ export function extractLocalImports(content: string): string[] {
 }
 
 // helper function to read parsed data from data.json
-export async function getParsedData(
-  dir: string
-): Promise<Record<string, { data: any[]; sourceFiles: string[] }>> {
+export async function getParsedData(dir: string): Promise<
+  Record<
+    string,
+    {
+      data: any[];
+      sourceFiles: string[];
+      status?: { schemaGenerated?: boolean; seeded?: boolean };
+    }
+  >
+> {
   try {
+    // First try the project directory
     const dataFilePath = `${dir}/data.json`;
     const dataContent = await fs.readFile(dataFilePath, "utf-8");
     const parsedData = JSON.parse(dataContent);
@@ -104,14 +112,151 @@ export async function getParsedData(
 
     return parsedData;
   } catch (error) {
-    if (error instanceof Error && error.message.includes("ENOENT")) {
-      console.log(
-        "No data.json file found. Please run 'imports' command first to extract data."
-      );
-    } else {
-      console.log("Error reading data.json:", error);
+    // If not found in project directory, try current directory
+    try {
+      const currentDirDataPath = `./data.json`;
+      const dataContent = await fs.readFile(currentDirDataPath, "utf-8");
+      const parsedData = JSON.parse(dataContent);
+      console.log(`Loaded data from ${currentDirDataPath}`);
+      console.log(`Found ${Object.keys(parsedData).length} tables with data`);
+
+      return parsedData;
+    } catch (currentDirError) {
+      if (error instanceof Error && error.message.includes("ENOENT")) {
+        console.log(
+          "No data.json file found. Please run 'imports' command first to extract data."
+        );
+      } else {
+        console.log("Error reading data.json:", error);
+      }
+      return {};
     }
-    return {};
+  }
+}
+
+// Helper function to update table status in data.json
+export async function updateTableStatus(
+  dir: string,
+  tableName: string,
+  status: { schemaGenerated?: boolean; seeded?: boolean }
+): Promise<void> {
+  try {
+    // First try the project directory
+    let dataFilePath = `${dir}/data.json`;
+    let existingData: any = {};
+
+    // Read existing data.json if it exists
+    try {
+      const existingContent = await fs.readFile(dataFilePath, "utf-8");
+      existingData = JSON.parse(existingContent);
+    } catch (readError) {
+      // If not found in project directory, try current directory
+      try {
+        dataFilePath = `./data.json`;
+        const existingContent = await fs.readFile(dataFilePath, "utf-8");
+        existingData = JSON.parse(existingContent);
+      } catch (currentDirError) {
+        console.log("Creating new data.json file for status tracking");
+      }
+    }
+
+    // Initialize table status if it doesn't exist
+    if (!existingData[tableName]) {
+      existingData[tableName] = { data: [], sourceFiles: [], status: {} };
+    }
+
+    // Update the status
+    if (!existingData[tableName].status) {
+      existingData[tableName].status = {};
+    }
+
+    if (status.schemaGenerated !== undefined) {
+      existingData[tableName].status.schemaGenerated = status.schemaGenerated;
+    }
+    if (status.seeded !== undefined) {
+      existingData[tableName].status.seeded = status.seeded;
+    }
+
+    // Write updated data back to data.json
+    await fs.writeFile(
+      dataFilePath,
+      JSON.stringify(existingData, null, 2),
+      "utf-8"
+    );
+    console.log(
+      `Updated status for table ${tableName}:`,
+      existingData[tableName].status
+    );
+  } catch (error) {
+    console.log(`Error updating table status for ${tableName}:`, error);
+    throw error;
+  }
+}
+
+// Helper function to get table status
+export async function getTableStatus(
+  dir: string,
+  tableName: string
+): Promise<{ schemaGenerated: boolean; seeded: boolean }> {
+  try {
+    const parsedData = await getParsedData(dir);
+    const tableData = parsedData[tableName];
+
+    if (!tableData) {
+      return { schemaGenerated: false, seeded: false };
+    }
+
+    return {
+      schemaGenerated: tableData.status?.schemaGenerated || false,
+      seeded: tableData.status?.seeded || false,
+    };
+  } catch (error) {
+    console.log(`Error getting table status for ${tableName}:`, error);
+    return { schemaGenerated: false, seeded: false };
+  }
+}
+
+// Helper function to get tables that need schema generation
+export async function getTablesNeedingSchema(dir: string): Promise<string[]> {
+  try {
+    const parsedData = await getParsedData(dir);
+    const tablesNeedingSchema: string[] = [];
+
+    for (const [tableName, tableData] of Object.entries(parsedData)) {
+      if (tableName === "apiRoutes") continue; // Skip apiRoutes table
+
+      const status = tableData.status || {};
+      if (!status.schemaGenerated) {
+        tablesNeedingSchema.push(tableName);
+      }
+    }
+
+    return tablesNeedingSchema;
+  } catch (error) {
+    console.log("Error getting tables needing schema:", error);
+    return [];
+  }
+}
+
+// Helper function to get tables that need seeding
+export async function getTablesNeedingSeeding(dir: string): Promise<string[]> {
+  try {
+    const parsedData = await getParsedData(dir);
+    const tablesNeedingSeeding: string[] = [];
+
+    for (const [tableName, tableData] of Object.entries(parsedData)) {
+      if (tableName === "apiRoutes") continue; // Skip apiRoutes table
+
+      const status = tableData.status || {};
+      if (status.schemaGenerated && !status.seeded) {
+        tablesNeedingSeeding.push(tableName);
+      }
+    }
+
+    return tablesNeedingSeeding;
+  } catch (error) {
+    console.log("Error getting tables needing seeding:", error);
+    return [];
   }
 }
 
@@ -336,4 +481,66 @@ function extractArrayManually(arrayString: string): any[] {
 
   console.log(`Manually extracted ${objects.length} objects from array string`);
   return objects;
+}
+
+// Helper function to extract table name from user query using GPT
+export async function extractTableNameFromQuery(
+  userQuery: string,
+  availableTables: string[]
+): Promise<string | null> {
+  if (availableTables.length === 0) {
+    return null;
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a database assistant that helps identify which table a user wants to work with based on their query.
+
+AVAILABLE TABLES: ${availableTables.join(", ")}
+
+TASK: Analyze the user's query and determine which table they want to work with. Return ONLY the exact table name from the available tables list, or "null" if no table matches.
+
+RULES:
+1. Return the EXACT table name as it appears in the AVAILABLE TABLES list
+2. Be flexible and understand synonyms, descriptions, and natural language
+3. If the user mentions multiple tables, return the most relevant one
+4. If no table matches, return "null"
+5. Return ONLY the table name or "null" - no explanations
+
+EXAMPLES:
+- "store recently played music" → "recentlyPlayed"
+- "create API for users" → "users" (if users table exists)
+- "seed products table" → "products" (if products table exists)
+- "generate schema for orders" → "orders" (if orders table exists)
+- "store customer data" → "customers" (if customers table exists)`,
+        },
+        {
+          role: "user",
+          content: `User query: "${userQuery}"`,
+        },
+      ],
+      temperature: 0.1,
+      max_tokens: 50,
+    });
+
+    const result = response.choices[0]?.message?.content?.trim();
+
+    if (!result || result === "null") {
+      return null;
+    }
+
+    // Verify the result is actually in our available tables
+    const matchedTable = availableTables.find(
+      (table) => table.toLowerCase() === result.toLowerCase()
+    );
+
+    return matchedTable || null;
+  } catch (error) {
+    console.log("Error extracting table name with GPT:", error);
+    return null;
+  }
 }
