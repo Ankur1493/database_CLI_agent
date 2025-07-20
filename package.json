@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "@types/figlet": "^1.7.0",
+    "@types/readline-sync": "^1.4.8",
     "commander": "^14.0.0",
     "figlet": "^1.8.2",
-    "openai": "^5.10.1"
+    "openai": "^5.10.1",
+    "readline-sync": "^1.4.10"
   }
 }

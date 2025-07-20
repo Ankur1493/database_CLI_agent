@@ -44,11 +44,11 @@ export async function drizzleOrmSetup(dir: string) {
     ) {
       drizzleStatus = true;
       console.log("Drizzle orm is already installed");
-      return true;
+      return "Drizzle orm is already installed successfully";
     }
   } catch (err) {
     console.log("No drizzle config file found");
-    return false;
+    return "Failed to check drizzle status - no package.json found";
   }
   if (!drizzleStatus) {
     try {
@@ -84,13 +84,14 @@ export async function drizzleOrmSetup(dir: string) {
       DATABASE_URL=postgres://postgres:postgres@localhost:5432/mydb`
       );
       console.log("Drizzle config created");
+      return "Drizzle orm installed and configured successfully";
     } catch (error) {
       console.log("Error installing drizzle orm");
       console.dir(error);
-      return false;
+      return "Failed to install drizzle orm - installation error occurred";
     }
   }
-  return true;
+  return "Drizzle orm setup completed successfully";
 }
 
 // helper function to extract array constants from a file
@@ -176,85 +177,56 @@ function extractLocalImports(content: string): string[] {
 
 // helper function to get the dataset for the project
 export async function getDataset(dir: string) {
-  //  logSection("Analyzing src/app/page.tsx");
-  const dataset = await fs.readFile(dir + "/src/app/page.tsx", "utf-8");
-
-  // Extract and print imports only for page.tsx
-  logSubsection("Local component imports in page.tsx");
-  const localImports = extractLocalImports(dataset);
-  if (localImports.length === 0) {
-    console.log("No local/component imports found.");
-    return [];
-  }
-
-  // Extract array constants for page.tsx
-  extractArrayConstants(dataset, "page.tsx");
-
-  const arrayConstants = [];
-  // For each local/aliased import, try to read the file and extract array constants
-  for (const imp of localImports) {
-    const match = imp.match(/from\s+['\"]([^'\"]+)['\"]/);
-    const importPath = match?.[1];
-    if (!importPath) continue;
-    let componentFilePath = "";
-    if (importPath.startsWith("@")) {
-      // Replace @ with dir/src (assuming @ is alias for src)
-      componentFilePath = dir + "/src" + importPath.slice(1) + ".tsx";
-    } else if (importPath.startsWith(".")) {
-      // Relative path from page.tsx
-      componentFilePath = dir + "/src/app/" + importPath + ".tsx";
-    }
+  try {
+    // Check if data.json already exists
     try {
-      logSection(`Analyzing ${componentFilePath}`);
-      const componentContent = await fs.readFile(componentFilePath, "utf-8");
-      const constants = extractArrayConstants(
-        componentContent,
-        componentFilePath
+      const dataPath = `${dir}/data.json`;
+      await fs.access(dataPath);
+      console.log("Data already extracted and saved to data.json");
+      return "Data already extracted - skipping extraction";
+    } catch (error) {
+      // data.json doesn't exist, continue with extraction
+      console.log(
+        "No existing data.json found, extracting data from components..."
       );
-      arrayConstants.push(...constants);
-    } catch (err) {
-      // Try index.tsx fallback for folders
-      try {
-        const fallbackPath = componentFilePath.replace(/\.tsx$/, "/index.tsx");
-        logSection(`Analyzing ${fallbackPath}`);
-        const componentContent = await fs.readFile(fallbackPath, "utf-8");
-        const constants = extractArrayConstants(componentContent, fallbackPath);
-        arrayConstants.push(...constants);
-      } catch (err2) {
-        logSection(`Could not read component file for import: ${importPath}`);
-      }
     }
-  }
 
-  // Parse the array constants and save to data.json
-  if (arrayConstants.length > 0) {
-    console.log("Parsing extracted data and saving to data.json...");
+    //  logSection("Analyzing src/app/page.tsx");
+    const dataset = await fs.readFile(dir + "/src/app/page.tsx", "utf-8");
 
-    // Track source files for each constant
-    const sourceFiles: string[] = [];
+    // Extract and print imports only for page.tsx
+    logSubsection("Local component imports in page.tsx");
+    const localImports = extractLocalImports(dataset);
+    if (localImports.length === 0) {
+      console.log("No local/component imports found.");
+      return "No local/component imports found - no data to extract";
+    }
+
+    // Extract array constants for page.tsx
+    extractArrayConstants(dataset, "page.tsx");
+
+    const arrayConstants = [];
+    // For each local/aliased import, try to read the file and extract array constants
     for (const imp of localImports) {
       const match = imp.match(/from\s+['\"]([^'\"]+)['\"]/);
       const importPath = match?.[1];
       if (!importPath) continue;
-
       let componentFilePath = "";
       if (importPath.startsWith("@")) {
+        // Replace @ with dir/src (assuming @ is alias for src)
         componentFilePath = dir + "/src" + importPath.slice(1) + ".tsx";
       } else if (importPath.startsWith(".")) {
+        // Relative path from page.tsx
         componentFilePath = dir + "/src/app/" + importPath + ".tsx";
       }
-
-      // Add source file for each constant found in this file
       try {
+        logSection(`Analyzing ${componentFilePath}`);
         const componentContent = await fs.readFile(componentFilePath, "utf-8");
         const constants = extractArrayConstants(
           componentContent,
           componentFilePath
         );
-        // Add the source file for each constant found
-        for (let i = 0; i < constants.length; i++) {
-          sourceFiles.push(componentFilePath);
-        }
+        arrayConstants.push(...constants);
       } catch (err) {
         // Try index.tsx fallback for folders
         try {
@@ -262,47 +234,107 @@ export async function getDataset(dir: string) {
             /\.tsx$/,
             "/index.tsx"
           );
+          logSection(`Analyzing ${fallbackPath}`);
           const componentContent = await fs.readFile(fallbackPath, "utf-8");
           const constants = extractArrayConstants(
             componentContent,
             fallbackPath
           );
-          for (let i = 0; i < constants.length; i++) {
-            sourceFiles.push(fallbackPath);
-          }
+          arrayConstants.push(...constants);
         } catch (err2) {
-          // Skip if file not found
+          logSection(`Could not read component file for import: ${importPath}`);
         }
       }
     }
 
-    const parsedData = parseArrayConstants(arrayConstants, sourceFiles);
+    // Parse the array constants and save to data.json
+    if (arrayConstants.length > 0) {
+      console.log("Parsing extracted data and saving to data.json...");
 
-    if (Object.keys(parsedData).length > 0) {
-      // Save the parsed data to data.json
-      const dataFilePath = `${dir}/data.json`;
-      await fs.writeFile(
-        dataFilePath,
-        JSON.stringify(parsedData, null, 2),
-        "utf-8"
-      );
-      console.log(`Data saved to ${dataFilePath}`);
+      // Track source files for each constant
+      const sourceFiles: string[] = [];
+      for (const imp of localImports) {
+        const match = imp.match(/from\s+['\"]([^'\"]+)['\"]/);
+        const importPath = match?.[1];
+        if (!importPath) continue;
 
-      // Log summary of extracted data
-      console.log(`\nExtracted data summary:`);
-      for (const [tableName, dataInfo] of Object.entries(parsedData)) {
-        console.log(
-          `  - ${tableName}: ${
-            dataInfo.data.length
-          } records (from ${dataInfo.sourceFiles.join(", ")})`
+        let componentFilePath = "";
+        if (importPath.startsWith("@")) {
+          componentFilePath = dir + "/src" + importPath.slice(1) + ".tsx";
+        } else if (importPath.startsWith(".")) {
+          componentFilePath = dir + "/src/app/" + importPath + ".tsx";
+        }
+
+        // Add source file for each constant found in this file
+        try {
+          const componentContent = await fs.readFile(
+            componentFilePath,
+            "utf-8"
+          );
+          const constants = extractArrayConstants(
+            componentContent,
+            componentFilePath
+          );
+          // Add the source file for each constant found
+          for (let i = 0; i < constants.length; i++) {
+            sourceFiles.push(componentFilePath);
+          }
+        } catch (err) {
+          // Try index.tsx fallback for folders
+          try {
+            const fallbackPath = componentFilePath.replace(
+              /\.tsx$/,
+              "/index.tsx"
+            );
+            const componentContent = await fs.readFile(fallbackPath, "utf-8");
+            const constants = extractArrayConstants(
+              componentContent,
+              fallbackPath
+            );
+            for (let i = 0; i < constants.length; i++) {
+              sourceFiles.push(fallbackPath);
+            }
+          } catch (err2) {
+            // Skip if file not found
+          }
+        }
+      }
+
+      const parsedData = parseArrayConstants(arrayConstants, sourceFiles);
+
+      if (Object.keys(parsedData).length > 0) {
+        // Save the parsed data to data.json
+        const dataFilePath = `${dir}/data.json`;
+        await fs.writeFile(
+          dataFilePath,
+          JSON.stringify(parsedData, null, 2),
+          "utf-8"
         );
+        console.log(`Data saved to ${dataFilePath}`);
+
+        // Log summary of extracted data
+        console.log(`\nExtracted data summary:`);
+        for (const [tableName, dataInfo] of Object.entries(parsedData)) {
+          console.log(
+            `  - ${tableName}: ${
+              dataInfo.data.length
+            } records (from ${dataInfo.sourceFiles.join(", ")})`
+          );
+        }
+        return `Data extracted successfully - found ${
+          Object.keys(parsedData).length
+        } tables with data`;
+      } else {
+        console.log("No valid data found to save");
+        return "No valid data found to save";
       }
     } else {
-      console.log("No valid data found to save");
+      return "No array constants found in components";
     }
+  } catch (error) {
+    console.error("Error extracting data:", error);
+    return `Error extracting data: ${error}`;
   }
-
-  return arrayConstants;
 }
 
 // helper function to read parsed data from data.json
@@ -333,6 +365,17 @@ export async function getParsedData(
 export async function generateDrizzleSchema(dir: string) {
   console.log("generating the drizzle orm schema...");
 
+  // Check if schema already exists
+  try {
+    const schemaPath = `${dir}/src/drizzle/schema.ts`;
+    await fs.access(schemaPath);
+    console.log("Schema already exists at src/drizzle/schema.ts");
+    return "Schema already exists - skipping generation";
+  } catch (error) {
+    // Schema doesn't exist, continue with generation
+    console.log("No existing schema found, generating new schema...");
+  }
+
   // Get parsed data from data.json
   const parsedData = await getParsedData(dir);
 
@@ -340,7 +383,7 @@ export async function generateDrizzleSchema(dir: string) {
     console.log(
       "No data found. Please run 'imports' command first to extract data."
     );
-    return;
+    return "No data found - please run extract-data first";
   }
 
   // Convert parsed data back to array constants format for the AI prompt
@@ -481,18 +524,36 @@ runMigrations().catch(console.error);
       stdio: "inherit",
     });
     console.log("Database migrations applied successfully");
+    return "Drizzle schema generated and database migrations applied successfully";
   } catch (error) {
     console.log("Error during database operations:", error);
     console.log("You can manually run the following commands:");
     console.log("1. npx drizzle-kit generate");
     console.log("2. npm install --save-dev tsx --legacy-peer-deps");
     console.log("3. npx tsx src/drizzle/migrate.ts");
+    return "Drizzle schema generated but database migrations failed - check console for manual commands";
   }
 }
 
 // helper function to seed the database with array constants data
 export async function seedDatabase(dir: string) {
   console.log("Seeding the database with extracted data...");
+
+  // Check if database has already been seeded by looking for seed file
+  try {
+    const seedPath = `${dir}/src/drizzle/seed.ts`;
+    await fs.access(seedPath);
+    console.log("Seed file already exists at src/drizzle/seed.ts");
+    console.log(
+      "Database may have already been seeded. Skipping seeding to avoid duplicates."
+    );
+    return "Database already seeded - skipping to avoid duplicates";
+  } catch (error) {
+    // Seed file doesn't exist, continue with seeding
+    console.log(
+      "No existing seed file found, proceeding with database seeding..."
+    );
+  }
 
   // Get parsed data from data.json
   const parsedData = await getParsedData(dir);
@@ -501,7 +562,7 @@ export async function seedDatabase(dir: string) {
     console.log(
       "No data found. Please run 'imports' command first to extract data."
     );
-    return;
+    return "No data found - please run extract-data first";
   }
 
   try {
@@ -529,10 +590,12 @@ export async function seedDatabase(dir: string) {
       stdio: "inherit",
     });
     console.log("Database seeded successfully");
+    return "Database seeded successfully";
   } catch (error) {
     console.log("Error during database seeding:", error);
     console.log("You can manually run the following command:");
     console.log("npx tsx src/drizzle/seed.ts");
+    return "Database seeding failed - check console for manual command";
   }
 }
 
@@ -835,7 +898,7 @@ export async function generateAPIRoute(dir: string, userQuery?: string) {
     console.log(
       "No data found. Please run 'imports' command first to extract data."
     );
-    return;
+    return "No data found - please run extract-data first";
   }
 
   // Read the schema file
@@ -844,16 +907,22 @@ export async function generateAPIRoute(dir: string, userQuery?: string) {
     schemaContent = await fs.readFile(`${dir}/src/drizzle/schema.ts`, "utf-8");
   } catch (error) {
     console.log("Error reading schema file:", error);
-    return;
+    return "Error reading schema file - please run generate-schema first";
   }
 
   // Generate API route using GPT with user query and schema
   if (userQuery) {
-    await generateAPIRouteWithGPT(dir, userQuery, schemaContent, parsedData);
+    return await generateAPIRouteWithGPT(
+      dir,
+      userQuery,
+      schemaContent,
+      parsedData
+    );
   } else {
     console.log(
       "Please provide a query to generate API routes for specific tables"
     );
+    return "No user query provided for API generation";
   }
 }
 
@@ -1130,15 +1199,19 @@ IMPORTANT:
         apiRouteDetails.tableUsed,
         parsedData
       );
+
+      return `API route created successfully: /api/${routeName} for table ${tableName}`;
     } catch (trackingError) {
       console.log(
         "⚠️ Warning: Could not store API route details in data.json:",
         trackingError
       );
+      return `API route created successfully: /api/${routeName} for table ${tableName} (tracking failed)`;
     }
   } catch (error) {
     console.log("❌ Error generating API route with GPT:", error);
     console.log("Please check your OpenAI API key and try again.");
+    return `Error generating API route: ${error}`;
   }
 }
 
@@ -1210,23 +1283,29 @@ async function generateUpdatedComponentCodeWithGPT(
   console.log(`🤖 Using GPT to update ${sourceFile} for ${tableName}...`);
 
   const prompt = `
-You are a React/Next.js expert. I need you to update a component file to replace a static data constant with dynamic data fetching from an API.
+You are a React/Next.js expert. I need you to update a component file to replace ONLY a specific static data constant with dynamic data fetching from an API.
+
+CRITICAL REQUIREMENTS:
+1. ONLY target the constant named "${tableName}" - do NOT touch any other constants or fetch calls
+2. Preserve ALL existing fetch calls, useState hooks, and useEffect hooks for other data
+3. Only replace the specific constant declaration for "${tableName}"
+4. Do NOT remove or modify any other existing code
 
 TASK:
-Find the constant named "${tableName}" in the file and replace it with:
-1. A useState hook to store the data
+Find ONLY the constant declaration named "${tableName}" in the file and replace it with:
+1. A useState hook to store the data for "${tableName}" only
 2. A useEffect hook to fetch data from the API endpoint: "${routePath}"
-3. Also add a conditional check to see if the data is already fetched, if it is, include loading and error jsx for that too if not there
-4. Don't change anything else apart from the updating the constant to a dynamic data
+3. Add loading and error states for this specific data only
 
 REQUIREMENTS:
 1. Add "use client" directive at the top if not present
-2. Import useState and useEffect from React if not already imported
-3. Replace the constant declaration with useState
-4. Add useEffect to fetch data from the API
-5. Handle loading states and errors appropriately
+2. Import useState and useEffect from React if not already imported (but don't duplicate imports)
+3. Replace ONLY the "${tableName}" constant declaration with useState
+4. Add useEffect to fetch data from the API for "${tableName}" only
+5. Handle loading states and errors appropriately for this data only
 6. Maintain all existing functionality and styling
 7. Keep the same variable name "${tableName}" for consistency
+8. DO NOT touch any other existing fetch calls, useState, or useEffect hooks
 
 API RESPONSE FORMAT:
 The API returns: { success: boolean, data: any[] }
@@ -1263,12 +1342,15 @@ useEffect(() => {
   fetch${tableName.charAt(0).toUpperCase() + tableName.slice(1)}();
 }, []);
 
-IMPORTANT:
+IMPORTANT RULES:
 - Return ONLY the complete updated file content
 - Do not include any explanations or markdown formatting
-- Preserve all existing code structure and formatting
-- Make sure the component still works exactly the same way
+- Preserve ALL existing code structure and formatting
+- ONLY modify the "${tableName}" constant array declaration - leave everything else unchanged
+- Do not remove any other fetch calls, useState, or useEffect hooks
 - If the constant is not found, return the original file content unchanged
+- DO NOT remove any existing fetch calls, useState, or useEffect hooks
+- DO NOT modify any other constants or data fetching logic
 
 FILE CONTENT:
 ${fileContent}
