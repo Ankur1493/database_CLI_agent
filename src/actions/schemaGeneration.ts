@@ -12,12 +12,13 @@ const openai = new OpenAI({
 export async function generateDrizzleSchema(dir: string) {
   console.log("generating the drizzle orm schema...");
 
-  // Check if schema already exists
+  // Check if schema already exists and remove it to regenerate
   try {
     const schemaPath = `${dir}/src/drizzle/schema.ts`;
     await fs.access(schemaPath);
-    console.log("Schema already exists at src/drizzle/schema.ts");
-    return "Schema already exists - skipping generation";
+    console.log("Existing schema found, removing to regenerate...");
+    await fs.unlink(schemaPath);
+    return "Schema already exists - regenerating";
   } catch (error) {
     // Schema doesn't exist, continue with generation
     console.log("No existing schema found, generating new schema...");
@@ -71,12 +72,21 @@ export async function generateDrizzleSchema(dir: string) {
   const schemaContent = schemaBlocks.map((match) => match[0]).join("\n\n");
 
   const processedContent = `${importLine}\n\n${schemaContent}`;
+
+  // Clean up any potential import issues
+  const cleanedContent = processedContent
+    .replace(
+      /import\s+\{[^}]*float[^}]*\}\s+from\s+['"]drizzle-orm\/pg-core['"];?/g,
+      "import { pgTable, uuid, varchar, integer, boolean, text, real } from 'drizzle-orm/pg-core';"
+    )
+    .replace(/float\(/g, "real(");
+
   // Ensure the drizzle directory exists before writing files
   const drizzleDir = `${dir}/src/drizzle`;
   await fs.mkdir(drizzleDir, { recursive: true });
 
   await Promise.all([
-    fs.writeFile(drizzleDir + "/schema.ts", processedContent),
+    fs.writeFile(drizzleDir + "/schema.ts", cleanedContent),
     fs.writeFile(
       drizzleDir + "/db.ts",
       `import { drizzle } from "drizzle-orm/postgres-js";
@@ -120,7 +130,7 @@ runMigrations().catch(console.error);
     ),
   ]);
 
-  console.log("Drizzle orm schema generated successfully", processedContent);
+  console.log("Drizzle orm schema generated successfully", cleanedContent);
 
   // Generate migrations using drizzle-kit
   try {

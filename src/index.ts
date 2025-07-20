@@ -9,6 +9,7 @@ import {
   seedDatabase,
   generateAPIRoute,
 } from "./actions";
+import { validateUserRequest } from "./actions/validation";
 import { getParsedData } from "./helperFunctions";
 import { SYSTEM_PROMPT } from "./prompts";
 
@@ -26,6 +27,7 @@ const openai = new OpenAI({
 const tools = {
   "check-drizzle": drizzleOrmSetup,
   "extract-data": getDataset,
+  "validate-request": validateUserRequest,
   "generate-schema": generateDrizzleSchema,
   "seed-database": seedDatabase,
   "generate-api": generateAPIRoute,
@@ -81,11 +83,14 @@ async function agentLoop(projectPath: string, userQuery: string) {
           action.input === "project_path" ? projectPath : action.input;
 
         let observation;
-        if (action.function === "generate-api") {
+        if (action.function === "validate-request") {
+          // For validate-request, pass both project path and original user query
+          observation = await (tool as any)(projectPath, userQuery);
+        } else if (action.function === "generate-api") {
           // For generate-api, pass both project path and original user query
           observation = await tool(actualInput, userQuery);
         } else {
-          observation = await tool(actualInput);
+          observation = await tool(actualInput, userQuery);
         }
 
         console.log(`✅ Observation: ${observation}`);
@@ -125,20 +130,18 @@ function promptForProjectPath() {
 promptForProjectPath();
 
 function showHelp() {
-  console.log("\nAvailable commands:");
-  console.log("  ls       - List directory contents");
-  console.log("  imports  - Get imports (extract data from components)");
-  console.log("  data     - View extracted data from data.json");
-  console.log("  drizzle  - Check drizzle config");
-  console.log("  schema   - Generate drizzle orm schema");
-  console.log("  seed     - Seed the database with extracted data");
-  console.log("  api      - Generate API route (usage: api <query>)");
-  console.log("            Example: api create API for recently played songs");
-  console.log("  ai       - AI Agent: Let AI handle the workflow");
-  console.log("            Example: ai store recently played music");
-  console.log("            Example: ai create API for recently played songs");
-  console.log("  exit     - Exit the CLI\n");
-  console.log("Workflow: imports → drizzle → schema → seed");
+  console.log("\nSample Commands:");
+  console.log("  ai        - AI Agent: Let AI handle the workflow");
+  console.log("             Example: ai store recently played music");
+  console.log("             Example: ai create API for recently played songs");
+  console.log(
+    "  validate  - Validate if a request can be fulfilled with available data"
+  );
+  console.log("             Example: validate store recently played music");
+  console.log(
+    "             Example: validate create API for ecommerce products\n"
+  );
+  console.log("  exit      - Exit the CLI\n");
 }
 
 // program
@@ -204,6 +207,17 @@ rl.on("line", async (line) => {
         break;
       case "seed":
         await seedDatabase(projectPath);
+        break;
+      case "validate":
+        if (args.length < 2) {
+          console.log("Usage: validate <query>");
+          console.log("Example: validate store recently played music");
+          console.log("Example: validate create API for ecommerce products");
+          rl.prompt();
+          return;
+        }
+        const validateQuery = args.slice(1).join(" ");
+        await validateUserRequest(projectPath, validateQuery);
         break;
       case "api":
         if (args.length < 2) {
